@@ -5,14 +5,21 @@ import CenterPanel from '@/sections/CenterPanel'
 import RightPanel from '@/sections/RightPanel'
 import FeatureShowcase from '@/sections/FeatureShowcase'
 import VoiceSettingsSheet from '@/sections/VoiceSettingsSheet'
+import JarvisSettingsSheet from '@/sections/JarvisSettingsSheet'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
+import type { VitalsResponse } from '@/types/vitals'
 
 export default function App() {
   const [voiceActive, setVoiceActive] = useState(false)
   const [voiceVolume, setVoiceVolume] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [jarvisSettingsOpen, setJarvisSettingsOpen] = useState(false)
   const [inboxBriefOpen, setInboxBriefOpen] = useState(false)
-  const { vitals, liveCount, loading, error, refresh } = useSystemVitals()
+  const { vitals, liveCount, loading, error, refresh, updatedAt } = useSystemVitals()
+
+  const vitalsSnapshot: VitalsResponse | null = updatedAt
+    ? { updatedAt, vitals, liveCount }
+    : null
 
   const handleVoiceToggle = useCallback((active: boolean, volume: number) => {
     setVoiceActive(active)
@@ -66,13 +73,22 @@ export default function App() {
               onInboxBriefToggle={toggleInboxBrief}
               onMetricsPull={() => void refresh()}
               metricsPulling={loading}
+              vitalsSnapshot={vitalsSnapshot}
             />
           </div>
         </div>
-        <StatusBar onOpenSettings={() => setSettingsOpen(true)} />
+        <StatusBar
+          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenJarvisSettings={() => setJarvisSettingsOpen(true)}
+        />
       </div>
 
       <VoiceSettingsSheet open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <JarvisSettingsSheet
+        open={jarvisSettingsOpen}
+        onOpenChange={setJarvisSettingsOpen}
+        vitalsSnapshot={vitalsSnapshot}
+      />
 
       {/* Feature Showcase — Scrolls over the hero */}
       <FeatureShowcase />

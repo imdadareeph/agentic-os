@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Settings, Volume2, RotateCcw } from 'lucide-react'
+import { Settings, Volume2, RotateCcw, Music } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -28,6 +28,7 @@ import {
 import { listBrowserVoices } from '@/services/tts'
 import { speakText } from '@/services/voice'
 import { playJarvisSample, JARVIS_TEST_PHRASE } from '@/lib/jarvis-voice'
+import { previewJarvisAmbient, stopJarvisAmbientPreview } from '@/lib/jarvis-ambient'
 import { isSpeechRecognitionSupported } from '@/services/speech-recognition'
 
 interface VoiceSettingsSheetProps {
@@ -51,7 +52,10 @@ export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettings
   const [testStatus, setTestStatus] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      stopJarvisAmbientPreview()
+      return
+    }
     const load = () => setVoices(listBrowserVoices())
     load()
     speechSynthesis.addEventListener('voiceschanged', load)
@@ -66,9 +70,9 @@ export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettings
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-md bg-[#0a0a0a] border-white/10 text-white overflow-y-auto"
+        className="w-full sm:max-w-md bg-[#0a0a0a] border-white/10 text-white overflow-y-auto scrollbar-jarvis px-6"
       >
-        <SheetHeader>
+        <SheetHeader className="px-0">
           <SheetTitle className="text-white flex items-center gap-2">
             <Settings size={16} className="text-amber-400" />
             Voice Settings
@@ -115,6 +119,49 @@ export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettings
                 onCheckedChange={v => set('whisperRefine', v)}
               />
             </div>
+          </Section>
+
+          <Section title="Background music">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70">Ambient loop while JARVIS is active</Label>
+              <Switch
+                checked={settings.ambientMusicEnabled}
+                onCheckedChange={v => set('ambientMusicEnabled', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Volume: {Math.round(settings.ambientMusicVolume * 100)}%
+              </Label>
+              <Slider
+                className="mt-2"
+                min={0}
+                max={30}
+                step={1}
+                disabled={!settings.ambientMusicEnabled}
+                value={[Math.round(settings.ambientMusicVolume * 100)]}
+                onValueChange={([v]) => set('ambientMusicVolume', v / 100)}
+              />
+            </div>
+            <p className="text-[9px] text-white/30 leading-relaxed">
+              Ducks automatically while listening and speaking so voice stays clear.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-white/10 text-white/70"
+              disabled={!settings.ambientMusicEnabled}
+              onClick={() => {
+                setTestStatus(null)
+                void previewJarvisAmbient(settings.ambientMusicVolume).catch(e =>
+                  setTestStatus(e instanceof Error ? e.message : 'Ambient preview failed')
+                )
+              }}
+            >
+              <Music size={14} className="mr-1" />
+              Preview ambient
+            </Button>
           </Section>
 
           <Section title="Speech-to-text">

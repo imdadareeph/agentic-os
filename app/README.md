@@ -56,6 +56,23 @@ Click **Voice** (gear) in the status bar to configure:
 
 Settings persist in browser localStorage.
 
+## JARVIS Settings
+
+Click **JARVIS** (brain icon) in the status bar to configure the LLM assistant:
+
+- **System instructions** — editable persona; reset to default anytime
+- **Short answers** — voice-friendly 1–2 sentence replies (default on)
+- **Deep thinking** — Ollama `think` mode for reasoning models (e.g. deepseek-r1, qwen3)
+- **Personality** — default, technical, casual, or executive briefing style
+- **Formality** — neutral, formal, or warm colleague tone
+- **Ollama model** — pick a model or auto-select the first available
+- **Temperature** and **max tokens** — inference tuning
+- **Conversation memory** — last N user+assistant turns sent to the model (default 4)
+- **Inject vitals** — append live YouTube, Instagram, Ollama stats to the system prompt
+- **Test prompt** — ask JARVIS inline without starting the mic
+
+Settings persist in browser localStorage. **NEW SESSION** in the command deck clears transcript and memory only — not these settings.
+
 ## Environment
 
 Copy `.env.example` to `.env` for build-time defaults. Runtime overrides live in Voice Settings.

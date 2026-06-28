@@ -81,12 +81,12 @@ export default function LeftPanel({
         <h1 className="text-2xl font-light tracking-[0.3em] text-white">
           J.A.R.V.I.S.
         </h1>
-        <p className="text-[9px] tracking-[0.2em] text-white/30 uppercase mt-1">
+        <p className="text-[9px] tracking-[0.2em] text-[#d8aa39] uppercase mt-1">
           Just A Rather Very Intelligent System
         </p>
       </div>
 
-      <div className="p-5 border-b border-white/15 flex-1 overflow-auto animate-fade-in stagger-1">
+      <div className="p-5 border-b border-white/15 flex-1 overflow-auto scrollbar-jarvis animate-fade-in stagger-1">
         <div className="flex items-center justify-between mb-4">
           <span className="text-label">System Vitals</span>
           <span

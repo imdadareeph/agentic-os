@@ -118,6 +118,23 @@
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
   }
+  .scrollbar-jarvis {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(216, 170, 57, 0.35) transparent;
+  }
+  .scrollbar-jarvis::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-jarvis::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-jarvis::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 3px;
+  }
+  .scrollbar-jarvis::-webkit-scrollbar-thumb:hover {
+    background: rgba(216, 170, 57, 0.45);
+  }
   .animate-pulse-glow {
     animation: pulseGlow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }

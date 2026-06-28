@@ -1,4 +1,4 @@
-import { Settings } from 'lucide-react'
+import { Settings, Brain } from 'lucide-react'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
 import { useVoiceSettings } from '@/stores/voice-settings-store'
 
@@ -37,9 +37,10 @@ function ServicePill({
 
 interface StatusBarProps {
   onOpenSettings?: () => void
+  onOpenJarvisSettings?: () => void
 }
 
-export default function StatusBar({ onOpenSettings }: StatusBarProps) {
+export default function StatusBar({ onOpenSettings, onOpenJarvisSettings }: StatusBarProps) {
   const [settings] = useVoiceSettings()
   const { voice, ollama, gitnexus, loading } = useServiceHealth()
   const voicebox = voice.voicebox
@@ -103,6 +104,18 @@ export default function StatusBar({ onOpenSettings }: StatusBarProps) {
           >
             <Settings size={12} />
             <span className="hidden sm:inline">Voice</span>
+          </button>
+        )}
+
+        {onOpenJarvisSettings && (
+          <button
+            type="button"
+            onClick={onOpenJarvisSettings}
+            className="flex items-center gap-1 text-[9px] tracking-wider text-white/30 hover:text-amber-400/80 transition-colors"
+            aria-label="JARVIS settings"
+          >
+            <Brain size={12} />
+            <span className="hidden sm:inline">JARVIS</span>
           </button>
         )}
       </div>

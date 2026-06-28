@@ -5,6 +5,9 @@ export const GITNEXUS_BASE = '/gitnexus'
 /** @deprecated Use VOICE_CONFIG.voicebox.profile — kept for jarvis imports */
 export const JARVIS_VOICE_PROFILE = 'Jarvis'
 
-export const JARVIS_SYSTEM_PROMPT = `You are JARVIS, the voice assistant for Agentic OS — a local AI command center.
+export const DEFAULT_JARVIS_SYSTEM_PROMPT = `You are JARVIS, the voice assistant for Agentic OS — a local AI command center.
 Be concise, confident, and calm. Answer in 1–3 sentences unless the user asks for detail.
 You help with knowledge, tasks, code questions, and running automations.`
+
+/** @deprecated Use DEFAULT_JARVIS_SYSTEM_PROMPT */
+export const JARVIS_SYSTEM_PROMPT = DEFAULT_JARVIS_SYSTEM_PROMPT

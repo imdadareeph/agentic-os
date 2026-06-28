@@ -5,8 +5,10 @@ import {
   useRealtimeConversation,
   type ConversationPhase,
 } from '@/hooks/useRealtimeConversation'
+import { useJarvisAmbient } from '@/hooks/useJarvisAmbient'
 import { useVoiceSettings } from '@/stores/voice-settings-store'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
+import type { VitalsResponse } from '@/types/vitals'
 
 const commands = [
   { id: 'inbox-brief', label: 'INBOX-BRIEF', active: false },
@@ -32,6 +34,7 @@ interface RightPanelProps {
   onInboxBriefToggle?: () => void
   onMetricsPull?: () => void
   metricsPulling?: boolean
+  vitalsSnapshot?: VitalsResponse | null
 }
 
 function pushPhaseLabel(phase: VoicePhase): string {
@@ -72,13 +75,20 @@ export default function RightPanel({
   onInboxBriefToggle,
   onMetricsPull,
   metricsPulling = false,
+  vitalsSnapshot = null,
 }: RightPanelProps) {
   const [settings] = useVoiceSettings()
   const { voice, ollama, loading: healthLoading } = useServiceHealth()
   const isConversation = settings.voiceMode === 'conversation'
 
-  const push = useVoiceAssistant(isConversation ? undefined : onVoiceToggle)
-  const convo = useRealtimeConversation(isConversation ? onVoiceToggle : undefined)
+  const push = useVoiceAssistant(
+    isConversation ? undefined : onVoiceToggle,
+    vitalsSnapshot
+  )
+  const convo = useRealtimeConversation(
+    isConversation ? onVoiceToggle : undefined,
+    vitalsSnapshot
+  )
 
   const [time, setTime] = useState(new Date())
   const [activeCommands, setActiveCommands] = useState<Set<string>>(
@@ -104,6 +114,17 @@ export default function RightPanel({
     phase === 'listening' || phase === 'speaking' || (isConversation && convo.conversationActive)
 
   const canUseVoice = !healthLoading && voice.sttReady && voice.ttsReady && ollama
+
+  const sessionActive = isConversation
+    ? convo.conversationActive
+    : push.phase !== 'idle'
+
+  useJarvisAmbient({
+    sessionActive,
+    phase,
+    enabled: settings.ambientMusicEnabled,
+    baseVolume: settings.ambientMusicVolume,
+  })
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000)
@@ -227,6 +248,13 @@ export default function RightPanel({
                   onInboxBriefToggle?.()
                 } else if (cmd.id === 'metrics-pull') {
                   onMetricsPull?.()
+                } else if (cmd.id === 'new-session') {
+                  if (isConversation) {
+                    convo.clearSession()
+                  } else {
+                    push.clearTranscript()
+                  }
+                  toggleCommand(cmd.id)
                 } else {
                   toggleCommand(cmd.id)
                 }
@@ -353,7 +381,7 @@ export default function RightPanel({
           </p>
         )}
 
-        <div className="mt-4 flex-1 overflow-y-auto space-y-3 text-[10px] leading-relaxed min-h-0">
+        <div className="mt-4 flex-1 overflow-y-auto scrollbar-jarvis space-y-3 text-[10px] leading-relaxed min-h-0">
           {isConversation && convo.phase === 'thinking' && (
             <p className="text-white/25 italic animate-pulse">JARVIS is thinking…</p>
           )}

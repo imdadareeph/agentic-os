@@ -8,6 +8,8 @@ import {
   isSpeechRecognitionSupported,
 } from '@/services/speech-recognition'
 import { getVoiceSettings, useVoiceSettings } from '@/stores/voice-settings-store'
+import { getJarvisSettings } from '@/stores/jarvis-settings-store'
+import type { VitalsResponse } from '@/types/vitals'
 
 export type ConversationPhase =
   | 'idle'
@@ -38,6 +40,7 @@ export interface RealtimeConversationState {
   stopConversation: () => void
   toggleConversation: () => Promise<void>
   sendNow: () => void
+  clearSession: () => void
 }
 
 function newTurnId(): string {
@@ -45,9 +48,12 @@ function newTurnId(): string {
 }
 
 export function useRealtimeConversation(
-  onActivity?: (active: boolean, volume: number) => void
+  onActivity?: (active: boolean, volume: number) => void,
+  vitalsSnapshot?: VitalsResponse | null
 ): RealtimeConversationState {
   useVoiceSettings()
+  const vitalsRef = useRef(vitalsSnapshot)
+  vitalsRef.current = vitalsSnapshot ?? null
   const [conversationActive, setConversationActive] = useState(false)
   const [phase, setPhase] = useState<ConversationPhase>('idle')
   const [volume, setVolume] = useState(0)
@@ -66,6 +72,11 @@ export function useRealtimeConversation(
   const interimRef = useRef('')
   const processingRef = useRef(false)
   const activeRef = useRef(false)
+  const turnsRef = useRef<ConversationTurn[]>([])
+
+  useEffect(() => {
+    turnsRef.current = turns
+  }, [turns])
 
   const isActive =
     conversationActive &&
@@ -242,6 +253,13 @@ export function useRealtimeConversation(
     const finalText = trimmed
     setPhase('thinking')
 
+    const jarvisCfg = getJarvisSettings()
+    const memoryCount = Math.max(0, jarvisCfg.conversationMemory)
+    const history =
+      memoryCount > 0
+        ? turnsRef.current.slice(-memoryCount * 2)
+        : []
+
     // Refine in background — never block JARVIS from replying
     void (async () => {
       const whisperOnline = peekWhisperStatus()?.online === true
@@ -273,7 +291,7 @@ export function useRealtimeConversation(
     })()
 
     try {
-      const reply = await think(finalText)
+      const reply = await think(finalText, history, vitalsRef.current)
       setTurns(prev => [
         ...prev,
         { id: newTurnId(), role: 'assistant', text: reply, timestamp: Date.now() },
@@ -372,6 +390,16 @@ export function useRealtimeConversation(
     void processTurnRef.current?.(combined)
   }, [clearSilenceTimer])
 
+  const clearSession = useCallback(() => {
+    setTurns([])
+    turnsRef.current = []
+    setInterimTranscript('')
+    turnTextRef.current = ''
+    interimRef.current = ''
+    lastInterimRef.current = ''
+    setError(null)
+  }, [])
+
   useEffect(() => {
     return () => {
       activeRef.current = false
@@ -394,5 +422,6 @@ export function useRealtimeConversation(
     stopConversation,
     toggleConversation,
     sendNow,
+    clearSession,
   }
 }

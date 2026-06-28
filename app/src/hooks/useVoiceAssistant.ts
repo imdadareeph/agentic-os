@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { transcribeAudio } from '@/services/voice'
 import { respondWithVoice } from '@/services/jarvis'
 import { getRecorderMimeType } from '@/lib/audio'
+import type { VitalsResponse } from '@/types/vitals'
 
 export type VoicePhase = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
 
@@ -15,11 +16,15 @@ export interface VoiceAssistantState {
   startListening: () => Promise<void>
   stopListening: () => Promise<void>
   toggleListening: () => Promise<void>
+  clearTranscript: () => void
 }
 
 export function useVoiceAssistant(
-  onActivity?: (active: boolean, volume: number) => void
+  onActivity?: (active: boolean, volume: number) => void,
+  vitalsSnapshot?: VitalsResponse | null
 ): VoiceAssistantState {
+  const vitalsRef = useRef(vitalsSnapshot)
+  vitalsRef.current = vitalsSnapshot ?? null
   const [phase, setPhase] = useState<VoicePhase>('idle')
   const [volume, setVolume] = useState(0)
   const [transcript, setTranscript] = useState('')
@@ -147,7 +152,7 @@ export function useVoiceAssistant(
       setTranscript(trimmed)
 
       setPhase('speaking')
-      const response = await respondWithVoice(trimmed)
+      const response = await respondWithVoice(trimmed, [], vitalsRef.current)
       setReply(response)
       setPhase('idle')
     } catch (err) {
@@ -163,6 +168,12 @@ export function useVoiceAssistant(
       await startListening()
     }
   }, [phase, startListening, stopListening])
+
+  const clearTranscript = useCallback(() => {
+    setTranscript('')
+    setReply('')
+    setError(null)
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -181,5 +192,6 @@ export function useVoiceAssistant(
     startListening,
     stopListening,
     toggleListening,
+    clearTranscript,
   }
 }

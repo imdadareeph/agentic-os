@@ -6,7 +6,7 @@ import {
   type VoiceMode,
 } from '@/config/voice'
 
-export const VOICE_SETTINGS_SCHEMA_VERSION = 1
+export const VOICE_SETTINGS_SCHEMA_VERSION = 2
 const STORAGE_KEY = 'agentic-os-voice-settings'
 
 export interface VoiceSettings {
@@ -25,6 +25,8 @@ export interface VoiceSettings {
   ttsPitch: number
   voiceboxProfile: string
   voiceboxEnabled: boolean
+  ambientMusicEnabled: boolean
+  ambientMusicVolume: number
 }
 
 export function getDefaultVoiceSettings(): VoiceSettings {
@@ -44,6 +46,8 @@ export function getDefaultVoiceSettings(): VoiceSettings {
     ttsPitch: VOICE_ENV_DEFAULTS.ttsPitch,
     voiceboxProfile: VOICE_ENV_DEFAULTS.voiceboxProfile,
     voiceboxEnabled: VOICE_ENV_DEFAULTS.voiceboxEnabled,
+    ambientMusicEnabled: true,
+    ambientMusicVolume: 0.12,
   }
 }
 
