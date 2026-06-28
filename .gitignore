@@ -8,6 +8,9 @@ dist-ssr/
 .env
 .env.*
 !.env.example
+app/.vitals-cache.json
+client_secret*.json
+.secrets/
 
 # Logs
 logs/

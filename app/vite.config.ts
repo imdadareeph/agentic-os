@@ -2,6 +2,7 @@ import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { inspectAttr } from 'kimi-plugin-inspect-react'
+import { vitalsApiPlugin } from './server/vite-vitals-plugin.ts'
 
 const serviceProxy = {
   '/whisper': {
@@ -29,7 +30,7 @@ const serviceProxy = {
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [inspectAttr(), react()],
+  plugins: [inspectAttr(), react(), vitalsApiPlugin()],
   server: {
     port: 3000,
     proxy: serviceProxy,

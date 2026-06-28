@@ -9,7 +9,7 @@ import { useVoiceSettings } from '@/stores/voice-settings-store'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
 
 const commands = [
-  { id: 'inbox-brief', label: 'INBOX-BRIEF', active: true },
+  { id: 'inbox-brief', label: 'INBOX-BRIEF', active: false },
   { id: 'metrics-pull', label: 'METRICS-PULL', active: false },
   { id: 'inbox-brief-2', label: 'INBOX-BRIEF', active: false },
   { id: 'am-report', label: 'AM-REPORT', active: false },
@@ -18,7 +18,7 @@ const commands = [
   { id: 'plan-today', label: 'PLAN-TODAY', active: true },
   { id: 'yt-week', label: 'YT-WEEK', active: false },
   { id: 'wk-review', label: 'WK-REVIEW', active: true },
-  { id: 'vault-clean', label: 'VAULT-CLEAN', active: false },
+  { id: 'new-session', label: 'NEW SESSION', active: false },
 ]
 
 interface AudioBar {
@@ -28,6 +28,10 @@ interface AudioBar {
 
 interface RightPanelProps {
   onVoiceToggle?: (active: boolean, volume: number) => void
+  inboxBriefOpen?: boolean
+  onInboxBriefToggle?: () => void
+  onMetricsPull?: () => void
+  metricsPulling?: boolean
 }
 
 function pushPhaseLabel(phase: VoicePhase): string {
@@ -62,7 +66,13 @@ function convoPhaseLabel(phase: ConversationPhase): string {
   }
 }
 
-export default function RightPanel({ onVoiceToggle }: RightPanelProps) {
+export default function RightPanel({
+  onVoiceToggle,
+  inboxBriefOpen = false,
+  onInboxBriefToggle,
+  onMetricsPull,
+  metricsPulling = false,
+}: RightPanelProps) {
   const [settings] = useVoiceSettings()
   const { voice, ollama, loading: healthLoading } = useServiceHealth()
   const isConversation = settings.voiceMode === 'conversation'
@@ -196,18 +206,35 @@ export default function RightPanel({ onVoiceToggle }: RightPanelProps) {
         <div className="flex items-center justify-between mb-4">
           <span className="text-label">Command Deck</span>
           <span className="text-[9px] text-white/20 font-mono">
-            {activeCommands.size} ACTIVE
+            {activeCommands.size + (inboxBriefOpen ? 1 : 0)} ACTIVE
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
-          {commands.map(cmd => (
+          {commands.map(cmd => {
+            const isCmdActive =
+              cmd.id === 'inbox-brief'
+                ? inboxBriefOpen
+                : cmd.id === 'metrics-pull'
+                  ? metricsPulling
+                  : activeCommands.has(cmd.id)
+
+            return (
             <button
               key={cmd.id}
-              onClick={() => toggleCommand(cmd.id)}
+              data-inbox-brief-trigger={cmd.id === 'inbox-brief' ? true : undefined}
+              onClick={() => {
+                if (cmd.id === 'inbox-brief') {
+                  onInboxBriefToggle?.()
+                } else if (cmd.id === 'metrics-pull') {
+                  onMetricsPull?.()
+                } else {
+                  toggleCommand(cmd.id)
+                }
+              }}
               className={`
                 px-3 py-2 text-[9px] tracking-widest uppercase text-left
                 border transition-all duration-300
-                ${activeCommands.has(cmd.id)
+                ${isCmdActive
                   ? 'border-amber-400/60 text-amber-300 bg-amber-400/5'
                   : 'border-white/10 text-white/40 hover:border-white/30 hover:text-white/60 hover:bg-white/5'
                 }
@@ -215,12 +242,13 @@ export default function RightPanel({ onVoiceToggle }: RightPanelProps) {
             >
               <span className="flex items-center gap-1.5">
                 <span
-                  className={`w-1 h-1 rounded-full ${activeCommands.has(cmd.id) ? 'bg-amber-400 animate-pulse' : 'bg-white/20'}`}
+                  className={`w-1 h-1 rounded-full ${isCmdActive ? 'bg-amber-400 animate-pulse' : 'bg-white/20'}`}
                 />
                 {cmd.label}
               </span>
             </button>
-          ))}
+            )
+          })}
         </div>
       </div>
 

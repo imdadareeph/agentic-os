@@ -7,9 +7,14 @@ const statusItems = ['CORE', 'WORKING', 'LINK', 'ONLINE', 'RUNNER', 'ALIVE']
 interface CenterPanelProps {
   isSpeaking?: boolean
   volume?: number
+  inboxBriefOpen?: boolean
 }
 
-export default function CenterPanel({ isSpeaking = false, volume = 0 }: CenterPanelProps) {
+export default function CenterPanel({
+  isSpeaking = false,
+  volume = 0,
+  inboxBriefOpen = false,
+}: CenterPanelProps) {
   const [views, setViews] = useState(9499)
 
   // Simulate view count changes
@@ -59,25 +64,29 @@ export default function CenterPanel({ isSpeaking = false, volume = 0 }: CenterPa
 
       {/* Center Content Overlay */}
       <div className="relative z-10 flex-1 flex items-center justify-center">
-        {/* Floating tooltip card */}
-        <div className="absolute top-16 right-16 border border-white/15 p-4 glass-panel max-w-[200px] animate-fade-in stagger-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap size={10} className="text-amber-400" />
-            <span className="text-[10px] tracking-widest uppercase text-amber-300">Inbox Brief</span>
+        {inboxBriefOpen && (
+          <div
+            data-inbox-brief-panel
+            className="absolute top-16 right-16 border border-white/15 p-4 glass-panel max-w-[200px] animate-fade-in stagger-3"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <Zap size={10} className="text-amber-400" />
+              <span className="text-[10px] tracking-widest uppercase text-amber-300">Inbox Brief</span>
+            </div>
+            <div className="text-[9px] text-white/40 leading-relaxed">
+              3 new messages processed. 2 tasks auto-scheduled. Workflow optimization complete.
+            </div>
+            <div className="mt-2 flex items-center gap-1">
+              {[40, 65, 45, 80, 55, 70, 50].map((h, i) => (
+                <div
+                  key={i}
+                  className="w-2 bg-amber-400/40 rounded-sm"
+                  style={{ height: `${h * 0.15}px` }}
+                />
+              ))}
+            </div>
           </div>
-          <div className="text-[9px] text-white/40 leading-relaxed">
-            3 new messages processed. 2 tasks auto-scheduled. Workflow optimization complete.
-          </div>
-          <div className="mt-2 flex items-center gap-1">
-            {[40, 65, 45, 80, 55, 70, 50].map((h, i) => (
-              <div
-                key={i}
-                className="w-2 bg-amber-400/40 rounded-sm"
-                style={{ height: `${h * 0.15}px` }}
-              />
-            ))}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Bottom Primary Display */}

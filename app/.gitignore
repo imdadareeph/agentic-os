@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Environment (never commit secrets)
+.env
+.env.*
+!.env.example
+.vitals-cache.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -400,7 +400,7 @@ export default function FeatureShowcase() {
       {/* Footer */}
       <footer className="border-t border-white/10 py-8 px-6 text-center">
         <p className="text-[10px] text-white/15 tracking-[0.3em] uppercase">
-          Agentic OS — Visual Autonomous Utility Live Terminal
+          Agentic OS — J.A.R.V.I.S.
         </p>
         <p className="text-[9px] text-white/10 mt-2 tracking-wider">
           Built with React, Three.js & Loop Engineering
