@@ -24,7 +24,9 @@ Whisper STT · Ollama brain · browser TTS · live vitals dashboard.
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vite.dev/)
 [![Ollama](https://img.shields.io/badge/Ollama-local-black?style=flat-square)](https://ollama.com/)
 [![Whisper](https://img.shields.io/badge/Whisper-Docker-412991?style=flat-square)](https://github.com/openai/whisper)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.com/invite/faJWzQfR)
+[![LinkedIn Newsletter](https://img.shields.io/badge/LinkedIn-Agentic_Coding-0A66C2?style=flat-square&logo=linkedin&logoColor=white)](https://www.linkedin.com/newsletters/agentic-coding-newsletters-7381811323283787776/)
+[![YouTube](https://img.shields.io/badge/YouTube-Watch_Demo-FF0000?style=flat-square&logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=6zBdu-w7HxY)
+[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat-square&logo=discord&logoColor=white)](https://discord.gg/sPQGKvGT)
 
 </div>
 
@@ -41,6 +43,13 @@ Unlike traditional AI chat applications, Agentic OS is built around the concept 
 ## Screenshots
 
 <table>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="app/public/screens/screen4.png" alt="JARVIS speaking — live voice conversation with waveform" width="100%" />
+      <br />
+      <sub><strong>JARVIS speaking</strong> — real-time voice reply, live waveform, full command-deck context</sub>
+    </td>
+  </tr>
   <tr>
     <td align="center">
       <img src="app/public/screens/screen1.png" alt="JARVIS dashboard — command deck and neural sphere" width="100%" />
@@ -350,9 +359,10 @@ Responsible for:
 
 ### AI
 
-* Ollama
+* Ollama/Claude
 * Whisper
 * Voicebox
+
 
 ### Storage
 
@@ -707,4 +717,43 @@ The operating system is the product.
 
 ## Community
 
-Join the Discord — [discord.com/invite/faJWzQfR](https://discord.com/invite/faJWzQfR)
+**Building in public for engineers shipping agentic systems** — local LLMs, voice runtimes, multi-agent orchestration, and desktop AI OS patterns.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://www.linkedin.com/newsletters/agentic-coding-newsletters-7381811323283787776/">
+        <img src="https://img.shields.io/badge/LinkedIn-Agentic_Coding_Newsletter-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn — Agentic Coding Newsletter" />
+      </a>
+      <br />
+      <br />
+      <a href="https://www.linkedin.com/newsletters/agentic-coding-newsletters-7381811323283787776/">
+        <img src="app/public/qrcodes/linkedin_newsletter_qr.png" alt="QR code — subscribe to Agentic Coding Newsletter on LinkedIn" width="180" />
+      </a>
+      <br />
+      <br />
+      <strong>Agentic Coding Newsletter</strong>
+      <br />
+      <sub>Weekly field notes on agent runtimes, voice pipelines, and OS-level AI architecture.<br />Scan or tap — no fluff, builder-first.</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="https://www.youtube.com/watch?v=6zBdu-w7HxY">
+        <img src="https://img.shields.io/badge/YouTube-Watch_JARVIS_Live-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="YouTube — JARVIS demo" />
+      </a>
+      <br />
+      <br />
+      <a href="https://www.youtube.com/watch?v=6zBdu-w7HxY">
+        <img src="app/public/qrcodes/newsletter.png" alt="QR code — watch Agentic OS JARVIS demo on YouTube" width="180" />
+      </a>
+      <br />
+      <br />
+      <strong>See JARVIS speak</strong>
+      <br />
+      <sub>Full walkthrough: mic → Whisper → Ollama → TTS on a real command deck.<br />Scan or tap — 2 minutes to "oh, that's an OS."</sub>
+    </td>
+  </tr>
+</table>
+
+<br />
+
+**Discord** — live builds, early access, and direct feedback → [discord.gg/sPQGKvGT](https://discord.gg/sPQGKvGT)
