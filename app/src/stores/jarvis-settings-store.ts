@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_JARVIS_SYSTEM_PROMPT } from '@/config/services'
+import { saveAiSettings, loadAiSettings } from '@/stores/ai-settings-store'
 
-export const JARVIS_SETTINGS_SCHEMA_VERSION = 1
+export const JARVIS_SETTINGS_SCHEMA_VERSION = 2
 const STORAGE_KEY = 'agentic-os-jarvis-settings'
 
 export type JarvisPersonality = 'default' | 'technical' | 'casual' | 'executive'
@@ -12,6 +13,7 @@ export interface JarvisSettings {
   systemInstructions: string
   shortAnswers: boolean
   deepThinking: boolean
+  /** @deprecated Migrated to AI Settings → Ollama model */
   ollamaModel: string
   temperature: number
   maxTokens: number
@@ -19,6 +21,7 @@ export interface JarvisSettings {
   personality: JarvisPersonality
   injectVitalsContext: boolean
   formality: JarvisFormality
+  showModelInStatusBar: boolean
 }
 
 export function getDefaultJarvisSettings(): JarvisSettings {
@@ -34,12 +37,37 @@ export function getDefaultJarvisSettings(): JarvisSettings {
     personality: 'default',
     injectVitalsContext: true,
     formality: 'neutral',
+    showModelInStatusBar: false,
+  }
+}
+
+function migrateOllamaModelToAiSettings(ollamaModel: string) {
+  if (!ollamaModel) return
+  const ai = loadAiSettings()
+  if (!ai.providers.ollama.model) {
+    saveAiSettings({
+      providers: {
+        ...ai.providers,
+        ollama: { ...ai.providers.ollama, model: ollamaModel },
+      },
+    })
   }
 }
 
 function migrate(stored: Partial<JarvisSettings>): JarvisSettings {
   const defaults = getDefaultJarvisSettings()
-  return { ...defaults, ...stored, schemaVersion: JARVIS_SETTINGS_SCHEMA_VERSION }
+  const version = stored.schemaVersion ?? 0
+
+  if (version < 2 && stored.ollamaModel) {
+    migrateOllamaModelToAiSettings(stored.ollamaModel)
+  }
+
+  return {
+    ...defaults,
+    ...stored,
+    schemaVersion: JARVIS_SETTINGS_SCHEMA_VERSION,
+    showModelInStatusBar: stored.showModelInStatusBar ?? defaults.showModelInStatusBar,
+  }
 }
 
 export function loadJarvisSettings(): JarvisSettings {

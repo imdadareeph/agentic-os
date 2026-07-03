@@ -1,4 +1,5 @@
 import type { ConversationTurn } from '@/hooks/useRealtimeConversation'
+import { getActiveProviderConfig } from '@/stores/ai-settings-store'
 import type { JarvisSettings } from '@/stores/jarvis-settings-store'
 import type { VitalsResponse } from '@/types/vitals'
 
@@ -38,7 +39,12 @@ export function buildSystemPrompt(
   settings: JarvisSettings,
   vitals?: VitalsResponse | null
 ): string {
-  const blocks: string[] = [settings.systemInstructions.trim()]
+  const providerInstructions = getActiveProviderConfig().systemInstructions.trim()
+  const jarvisInstructions = settings.systemInstructions.trim()
+  const blocks: string[] = []
+
+  if (providerInstructions) blocks.push(providerInstructions)
+  if (jarvisInstructions) blocks.push(jarvisInstructions)
 
   if (settings.shortAnswers) {
     blocks.push(

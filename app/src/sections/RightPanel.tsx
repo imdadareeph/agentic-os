@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Mic, MicOff, Activity, Loader2, MessageCircle } from 'lucide-react'
 import { useVoiceAssistant, type VoicePhase } from '@/hooks/useVoiceAssistant'
 import {
@@ -78,7 +78,7 @@ export default function RightPanel({
   vitalsSnapshot = null,
 }: RightPanelProps) {
   const [settings] = useVoiceSettings()
-  const { voice, ollama, loading: healthLoading } = useServiceHealth()
+  const { voice, brain, loading: healthLoading } = useServiceHealth()
   const isConversation = settings.voiceMode === 'conversation'
 
   const push = useVoiceAssistant(
@@ -100,6 +100,10 @@ export default function RightPanel({
 
   const phase = isConversation ? convo.phase : push.phase
   const volume = isConversation ? convo.volume : push.volume
+  const volumeRef = useRef(volume)
+  volumeRef.current = volume
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
   const isActive = isConversation ? convo.isActive : push.isActive
   const phaseText = isConversation ? convoPhaseLabel(convo.phase) : pushPhaseLabel(push.phase)
   const displayError = isConversation ? convo.error : push.error
@@ -113,7 +117,7 @@ export default function RightPanel({
   const showWaveform =
     phase === 'listening' || phase === 'speaking' || (isConversation && convo.conversationActive)
 
-  const canUseVoice = !healthLoading && voice.sttReady && voice.ttsReady && ollama
+  const canUseVoice = !healthLoading && voice.sttReady && voice.ttsReady && brain.online
 
   const sessionActive = isConversation
     ? convo.conversationActive
@@ -150,38 +154,40 @@ export default function RightPanel({
 
   useEffect(() => {
     if (!showWaveform) {
-      setAudioBars(prev => prev.map(b => ({ ...b, targetHeight: 3 })))
+      setAudioBars(prev => {
+        if (prev.every(b => b.height === 3 && b.targetHeight === 3)) return prev
+        return prev.map(() => ({ height: 3, targetHeight: 3 }))
+      })
       return
     }
 
-    const interval = setInterval(() => {
+    let frame = 0
+    const tick = () => {
       const base =
-        phase === 'listening' ? volume : 0.4 + Math.random() * 0.3
-      setAudioBars(prev =>
-        prev.map((_, i) => {
+        phaseRef.current === 'listening'
+          ? volumeRef.current
+          : 0.4 + Math.random() * 0.3
+
+      setAudioBars(prev => {
+        let changed = false
+        const next = prev.map((b, i) => {
           const wave = Math.sin(Date.now() / 120 + i * 0.4) * 0.5 + 0.5
-          return { height: 0, targetHeight: 3 + base * wave * 28 }
+          const targetHeight = 3 + base * wave * 28
+          const height = b.height + (targetHeight - b.height) * 0.3
+          if (Math.abs(b.height - height) > 0.08 || Math.abs(b.targetHeight - targetHeight) > 0.08) {
+            changed = true
+          }
+          return { height, targetHeight }
         })
-      )
-    }, 80)
+        return changed ? next : prev
+      })
 
-    return () => clearInterval(interval)
-  }, [showWaveform, volume, phase])
-
-  useEffect(() => {
-    let frame: number
-    const update = () => {
-      setAudioBars(prev =>
-        prev.map(b => ({
-          ...b,
-          height: b.height + (b.targetHeight - b.height) * 0.3,
-        }))
-      )
-      frame = requestAnimationFrame(update)
+      frame = requestAnimationFrame(tick)
     }
-    frame = requestAnimationFrame(update)
+
+    frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [])
+  }, [showWaveform])
 
   useEffect(() => {
     if (isConversation) return
@@ -375,8 +381,8 @@ export default function RightPanel({
 
         {!canUseVoice && !healthLoading && (
           <p className="mt-2 text-[9px] text-amber-400/60 text-center">
-            {!ollama
-              ? 'Ollama offline — run ollama serve'
+            {!brain.online
+              ? `${brain.label} offline — check AI Settings`
               : 'Voice unavailable — open Voice Settings or run npm run voice:whisper'}
           </p>
         )}

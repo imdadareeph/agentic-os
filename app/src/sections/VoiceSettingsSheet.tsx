@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
+import { GITNEXUS_ENABLED } from '@/config/services'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
 import {
   resetVoiceSettings,
@@ -47,7 +48,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettingsSheetProps) {
   const [settings, update] = useVoiceSettings()
-  const { voice, ollama, gitnexus, loading } = useServiceHealth()
+  const { voice, brain, gitnexus, loading } = useServiceHealth()
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [testStatus, setTestStatus] = useState<string | null>(null)
 
@@ -296,8 +297,10 @@ export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettings
                 <li>Whisper: {voice.sttModel ?? '—'} {voice.sttFallback ? '(fallback)' : ''}</li>
                 <li>Live STT: {voice.liveSttReady ? 'ready' : 'off'}</li>
                 <li>TTS: {voice.ttsModel ?? voice.ttsProvider}</li>
-                <li>Ollama: {ollama ? 'online' : 'offline'}</li>
-                <li>GitNexus: {gitnexus ? 'online' : 'offline'}</li>
+                <li>{brain.label}: {brain.online ? 'online' : 'offline'}</li>
+                {GITNEXUS_ENABLED && (
+                  <li>GitNexus: {gitnexus ? 'online' : 'offline'}</li>
+                )}
                 {voice.voicebox && (
                   <li>Voicebox: {voice.voicebox.online ? 'online' : 'offline'}</li>
                 )}

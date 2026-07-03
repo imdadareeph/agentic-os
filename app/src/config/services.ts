@@ -2,6 +2,15 @@
 export const OLLAMA_BASE = '/ollama'
 export const GITNEXUS_BASE = '/gitnexus'
 
+function envFlag(name: string, defaultValue: boolean): boolean {
+  const raw = import.meta.env[name]
+  if (raw === undefined || raw === '') return defaultValue
+  return raw === 'true' || raw === '1'
+}
+
+/** When false, skip GitNexus health probes (avoids Vite proxy errors if :4747 is down). */
+export const GITNEXUS_ENABLED = envFlag('VITE_GITNEXUS_ENABLED', false)
+
 /** @deprecated Use VOICE_CONFIG.voicebox.profile — kept for jarvis imports */
 export const JARVIS_VOICE_PROFILE = 'Jarvis'
 

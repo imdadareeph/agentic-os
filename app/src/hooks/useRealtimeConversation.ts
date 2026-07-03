@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { getRecorderMimeType } from '@/lib/audio'
+import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
 import { think } from '@/services/jarvis'
 import { speakText, transcribeAudio } from '@/services/voice'
 import { peekWhisperStatus } from '@/services/whisper'
@@ -65,7 +65,7 @@ export function useRealtimeConversation(
   const streamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  const rafRef = useRef<number>(0)
+  const stopMeterRef = useRef<(() => void) | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnTextRef = useRef('')
@@ -84,9 +84,17 @@ export function useRealtimeConversation(
 
   const canStart = isSpeechRecognitionSupported()
 
+  const onActivityRef = useRef(onActivity)
+  onActivityRef.current = onActivity
+  const lastActivityPushRef = useRef({ active: false, volume: 0 })
+
   useEffect(() => {
-    onActivity?.(isActive, volume)
-  }, [isActive, volume, onActivity])
+    const prev = lastActivityPushRef.current
+    const volumeDelta = Math.abs(volume - prev.volume)
+    if (prev.active === isActive && volumeDelta < 0.03) return
+    lastActivityPushRef.current = { active: isActive, volume }
+    onActivityRef.current?.(isActive, volume)
+  }, [isActive, volume])
 
   const clearSilenceTimer = useCallback(() => {
     if (silenceTimerRef.current) {
@@ -96,7 +104,8 @@ export function useRealtimeConversation(
   }, [])
 
   const stopVolumeLoop = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    stopMeterRef.current?.()
+    stopMeterRef.current = null
     setVolume(0)
   }, [])
 
@@ -160,6 +169,13 @@ export function useRealtimeConversation(
     recorderRef.current = recorder
   }, [])
 
+  /** Arm MediaRecorder only when Whisper refine needs audio — avoids mic contention with live STT. */
+  const ensureRecording = useCallback(() => {
+    const cfg = getVoiceSettings()
+    if (!cfg.whisperRefine || cfg.sttFinalProvider === 'voicebox') return
+    startRecorder()
+  }, [startRecorder])
+
   const cleanupMedia = useCallback(() => {
     stopVolumeLoop()
     void stopRecorder()
@@ -200,6 +216,7 @@ export function useRealtimeConversation(
         lastInterimRef.current = text
         interimRef.current = text
         setInterimTranscript(text)
+        ensureRecording()
         scheduleTurnEnd()
       },
       onFinal: text => {
@@ -208,6 +225,7 @@ export function useRealtimeConversation(
         interimRef.current = ''
         lastInterimRef.current = ''
         setInterimTranscript('')
+        ensureRecording()
         // Final segments mean the user paused — commit quickly
         scheduleTurnEnd(350)
       },
@@ -216,7 +234,7 @@ export function useRealtimeConversation(
       },
       onEnd: () => {},
     })
-  }, [scheduleTurnEnd, stopRecognition])
+  }, [ensureRecording, scheduleTurnEnd, stopRecognition])
 
   const resumeListening = useCallback(() => {
     if (!activeRef.current) {
@@ -224,9 +242,8 @@ export function useRealtimeConversation(
       return
     }
     setPhase('listening')
-    startRecorder()
     beginRecognition()
-  }, [beginRecognition, startRecorder])
+  }, [beginRecognition])
 
   const processTurnRef = useRef<(text: string) => Promise<void>>(async () => {})
 
@@ -234,8 +251,12 @@ export function useRealtimeConversation(
     if (processingRef.current || !activeRef.current) return
     const cfg = getVoiceSettings()
     const trimmed = browserText.trim()
-    if (trimmed.length < cfg.minTurnChars) return
+    if (trimmed.length < cfg.minTurnChars) {
+      setError(`Speak at least ${cfg.minTurnChars} characters — heard: "${trimmed || '…'}"`)
+      return
+    }
 
+    setError(null)
     processingRef.current = true
     clearSilenceTimer()
     stopRecognition()
@@ -270,10 +291,7 @@ export function useRealtimeConversation(
       if (!shouldRefine) return
 
       const blob = await stopRecorder()
-      if (!blob || blob.size <= 1000) {
-        startRecorder()
-        return
-      }
+      if (!blob || blob.size <= 1000) return
 
       try {
         const refined = await transcribeAudio(blob)
@@ -285,8 +303,6 @@ export function useRealtimeConversation(
         }
       } catch {
         // Browser transcript is authoritative when refine is unavailable
-      } finally {
-        if (activeRef.current && !processingRef.current) startRecorder()
       }
     })()
 
@@ -336,25 +352,18 @@ export function useRealtimeConversation(
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
+      // Start live STT before any other audio processing on this stream.
+      beginRecognition()
+
       const audioCtx = new AudioContext()
       audioCtxRef.current = audioCtx
+      await audioCtx.resume()
       const source = audioCtx.createMediaStreamSource(stream)
       const analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 256
       source.connect(analyser)
 
-      const data = new Uint8Array(analyser.frequencyBinCount)
-      const tick = () => {
-        analyser.getByteFrequencyData(data)
-        let sum = 0
-        for (let i = 0; i < data.length; i++) sum += data[i]
-        setVolume(Math.min(1, (sum / data.length / 255) * 2.5))
-        rafRef.current = requestAnimationFrame(tick)
-      }
-      rafRef.current = requestAnimationFrame(tick)
-
-      startRecorder()
-      beginRecognition()
+      stopMeterRef.current?.()
+      stopMeterRef.current = startMicLevelMeter(analyser, setVolume)
     } catch (err) {
       activeRef.current = false
       setConversationActive(false)
@@ -363,7 +372,7 @@ export function useRealtimeConversation(
       setError(err instanceof Error ? err.message : 'Microphone access denied')
       setPhase('error')
     }
-  }, [beginRecognition, canStart, cleanupMedia, startRecorder, stopRecognition])
+  }, [beginRecognition, canStart, cleanupMedia, stopRecognition])
 
   const stopConversation = useCallback(() => {
     activeRef.current = false

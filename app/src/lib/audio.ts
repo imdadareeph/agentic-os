@@ -69,6 +69,45 @@ export async function recordingBlobToWav(blob: Blob): Promise<Blob> {
   }
 }
 
+/** Real-time mic level 0–1 from an AnalyserNode (time-domain RMS, quiet-speech friendly). */
+export function startMicLevelMeter(
+  analyser: AnalyserNode,
+  onLevel: (level: number) => void
+): () => void {
+  analyser.fftSize = 1024
+  analyser.smoothingTimeConstant = 0.4
+  const timeData = new Uint8Array(analyser.fftSize)
+  let noiseFloor = 0.004
+  let raf = 0
+
+  const tick = () => {
+    analyser.getByteTimeDomainData(timeData)
+    let sumSq = 0
+    for (let i = 0; i < timeData.length; i++) {
+      const sample = (timeData[i] - 128) / 128
+      sumSq += sample * sample
+    }
+    const rms = Math.sqrt(sumSq / timeData.length)
+
+    if (rms < noiseFloor * 2) {
+      noiseFloor = noiseFloor * 0.992 + rms * 0.008
+    }
+    noiseFloor = Math.min(Math.max(noiseFloor, 0.002), 0.05)
+
+    const above = Math.max(0, rms - noiseFloor)
+    // Quiet speech (~0.02 RMS) still reaches ~30%; normal speech fills the bar.
+    const level = Math.min(1, above / 0.055)
+    onLevel(level)
+    raf = requestAnimationFrame(tick)
+  }
+
+  raf = requestAnimationFrame(tick)
+  return () => {
+    cancelAnimationFrame(raf)
+    onLevel(0)
+  }
+}
+
 /** Pick the best MediaRecorder MIME type for this browser. */
 export function getRecorderMimeType(): string {
   const candidates = [

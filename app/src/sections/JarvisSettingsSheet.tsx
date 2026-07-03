@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Brain, RotateCcw, Sparkles } from 'lucide-react'
 import {
   Sheet,
@@ -20,17 +20,15 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
-import { getOllamaModels } from '@/services/ollama'
 import { think } from '@/services/jarvis'
-import {
-  DEFAULT_JARVIS_SYSTEM_PROMPT,
-} from '@/config/services'
+import { DEFAULT_JARVIS_SYSTEM_PROMPT } from '@/config/services'
 import {
   getDefaultJarvisSettings,
   resetJarvisSettings,
   useJarvisSettings,
   type JarvisSettings,
 } from '@/stores/jarvis-settings-store'
+import { useAiSettings } from '@/stores/ai-settings-store'
 import { buildSystemPrompt, isReasoningModelName } from '@/lib/jarvis-prompt'
 import type { VitalsResponse } from '@/types/vitals'
 
@@ -55,27 +53,26 @@ export default function JarvisSettingsSheet({
   vitalsSnapshot = null,
 }: JarvisSettingsSheetProps) {
   const [settings, update] = useJarvisSettings()
-  const [models, setModels] = useState<string[]>([])
+  const [aiSettings] = useAiSettings()
   const [testPrompt, setTestPrompt] = useState('What is your status?')
   const [testReply, setTestReply] = useState<string | null>(null)
   const [testLoading, setTestLoading] = useState(false)
   const [testError, setTestError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-    void getOllamaModels().then(setModels)
-    setTestReply(null)
-    setTestError(null)
-  }, [open])
-
   const set = <K extends keyof JarvisSettings>(key: K, value: JarvisSettings[K]) => {
     update({ [key]: value })
   }
 
+  const activeModel =
+    aiSettings.activeProvider === 'ollama'
+      ? aiSettings.providers.ollama.model
+      : aiSettings.providers[aiSettings.activeProvider].model
+
   const showReasoningHint =
     settings.deepThinking &&
-    settings.ollamaModel &&
-    !isReasoningModelName(settings.ollamaModel)
+    aiSettings.activeProvider === 'ollama' &&
+    activeModel &&
+    !isReasoningModelName(activeModel)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -89,12 +86,16 @@ export default function JarvisSettingsSheet({
             JARVIS Settings
           </SheetTitle>
           <SheetDescription className="text-white/40">
-            System instructions, behavior, and Ollama inference. Saved in this browser.
+            Additional instructions and behavior layered on the active AI provider. Saved in this
+            browser.
           </SheetDescription>
         </SheetHeader>
 
         <div className="mt-6 space-y-5 pb-6">
-          <Section title="System instructions">
+          <Section title="Additional instructions">
+            <p className="text-[9px] text-white/30">
+              Layered on top of the active provider&apos;s system instructions in AI Settings.
+            </p>
             <Textarea
               className="min-h-[140px] bg-white/5 border-white/10 text-white/80 text-xs leading-relaxed font-mono"
               value={settings.systemInstructions}
@@ -128,9 +129,17 @@ export default function JarvisSettingsSheet({
             </div>
             {showReasoningHint && (
               <p className="text-[9px] text-amber-400/70">
-                Reasoning model recommended (e.g. deepseek-r1, qwen3) for deep thinking.
+                Reasoning model recommended (e.g. deepseek-r1, qwen3) for deep thinking — set in AI
+                Settings.
               </p>
             )}
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70">Show model in status bar</Label>
+              <Switch
+                checked={settings.showModelInStatusBar}
+                onCheckedChange={v => set('showModelInStatusBar', v)}
+              />
+            </div>
             <div className="flex items-center justify-between">
               <Label className="text-white/70">Personality</Label>
               <Select
@@ -166,26 +175,7 @@ export default function JarvisSettingsSheet({
             </div>
           </Section>
 
-          <Section title="Model and inference">
-            <div className="flex items-center justify-between">
-              <Label className="text-white/70">Ollama model</Label>
-              <Select
-                value={settings.ollamaModel || '__auto__'}
-                onValueChange={v => set('ollamaModel', v === '__auto__' ? '' : v)}
-              >
-                <SelectTrigger className="w-[180px] bg-white/5 border-white/10">
-                  <SelectValue placeholder="Auto (first available)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__auto__">Auto (first available)</SelectItem>
-                  {models.map(m => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          <Section title="Inference">
             <div>
               <Label className="text-white/70 text-xs">
                 Temperature: {settings.temperature.toFixed(1)}
@@ -292,7 +282,7 @@ export default function JarvisSettingsSheet({
           </Button>
           <p className="text-[9px] text-white/20">
             Defaults: short answers on, memory {getDefaultJarvisSettings().conversationMemory}{' '}
-            turns, vitals context on.
+            turns, vitals context on. Model selection is in AI Settings.
           </p>
         </div>
       </SheetContent>

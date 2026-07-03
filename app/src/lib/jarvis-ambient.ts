@@ -4,12 +4,22 @@ const FADE_MS = 300
 
 let ambientAudio: HTMLAudioElement | null = null
 let fadeRaf: number | null = null
+let ambientUnavailable = false
 
-function getAudio(): HTMLAudioElement {
+function getAudio(): HTMLAudioElement | null {
+  if (ambientUnavailable) return null
   if (!ambientAudio) {
     ambientAudio = new Audio(JARVIS_AMBIENT_PATH)
     ambientAudio.loop = true
     ambientAudio.preload = 'auto'
+    ambientAudio.addEventListener(
+      'error',
+      () => {
+        ambientUnavailable = true
+        ambientAudio = null
+      },
+      { once: true }
+    )
   }
   return ambientAudio
 }
@@ -24,6 +34,7 @@ function cancelFade(): void {
 function fadeTo(target: number): void {
   cancelFade()
   const audio = getAudio()
+  if (!audio) return
   const start = audio.volume
   const delta = target - start
   if (Math.abs(delta) < 0.005) {
@@ -46,6 +57,7 @@ function fadeTo(target: number): void {
 
 export async function startJarvisAmbient(volume: number): Promise<void> {
   const audio = getAudio()
+  if (!audio) return
   cancelFade()
   audio.volume = Math.max(0, Math.min(1, volume))
   if (audio.paused) {
@@ -64,12 +76,14 @@ export function setJarvisAmbientVolume(volume: number): void {
 export function stopJarvisAmbient(): void {
   cancelFade()
   const audio = getAudio()
+  if (!audio) return
   audio.pause()
   audio.currentTime = 0
 }
 
 export async function previewJarvisAmbient(volume: number): Promise<void> {
   const audio = getAudio()
+  if (!audio) return
   cancelFade()
   audio.volume = Math.max(0, Math.min(1, volume))
   audio.currentTime = 0

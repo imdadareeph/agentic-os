@@ -20,6 +20,16 @@ const serviceProxy = {
     changeOrigin: true,
     rewrite: (p: string) => p.replace(/^\/ollama/, ''),
   },
+  '/anthropic': {
+    target: 'https://api.anthropic.com',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/anthropic/, ''),
+  },
+  '/gemini': {
+    target: 'https://generativelanguage.googleapis.com',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/gemini/, ''),
+  },
   '/gitnexus': {
     target: 'http://localhost:4747',
     changeOrigin: true,

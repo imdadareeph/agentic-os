@@ -1,6 +1,8 @@
-import { Settings, Brain } from 'lucide-react'
+import { Settings, Brain, Cpu } from 'lucide-react'
+import { GITNEXUS_ENABLED } from '@/config/services'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
 import { useVoiceSettings } from '@/stores/voice-settings-store'
+import { useJarvisSettings } from '@/stores/jarvis-settings-store'
 
 function Dot({ on }: { on: boolean }) {
   return (
@@ -38,17 +40,33 @@ function ServicePill({
 interface StatusBarProps {
   onOpenSettings?: () => void
   onOpenJarvisSettings?: () => void
+  onOpenAiSettings?: () => void
 }
 
-export default function StatusBar({ onOpenSettings, onOpenJarvisSettings }: StatusBarProps) {
+export default function StatusBar({
+  onOpenSettings,
+  onOpenJarvisSettings,
+  onOpenAiSettings,
+}: StatusBarProps) {
   const [settings] = useVoiceSettings()
-  const { voice, ollama, gitnexus, loading } = useServiceHealth()
+  const [jarvisSettings] = useJarvisSettings()
+  const { voice, brain, gitnexus, loading } = useServiceHealth()
   const voicebox = voice.voicebox
 
-  const brain =
-    ollama ? 'Ollama' : voicebox?.online ? 'Voicebox LLM' : 'Offline'
-
   const voiceReady = voice.sttReady && voice.ttsReady
+
+  const brainLabel = loading
+    ? '…'
+    : brain.online
+      ? brain.label
+      : `${brain.label} offline`
+
+  const modelSuffix =
+    !loading &&
+    jarvisSettings.showModelInStatusBar &&
+    brain.model
+      ? ` · ${brain.model}`
+      : ''
 
   return (
     <footer
@@ -85,15 +103,14 @@ export default function StatusBar({ onOpenSettings, onOpenJarvisSettings }: Stat
         )}
 
         <span className="text-white/10 hidden sm:inline">|</span>
-        <span className="flex items-center gap-1.5 text-[9px] tracking-wider text-white/40">
-          <Dot on={ollama} />
-          <span className={ollama ? 'text-white/50' : 'text-white/25'}>Ollama</span>
-        </span>
+        <ServicePill label={brain.label} on={brain.online} />
 
-        <span className="flex items-center gap-1.5 text-[9px] tracking-wider text-white/40">
-          <Dot on={gitnexus} />
-          <span className={gitnexus ? 'text-white/50' : 'text-white/25'}>GitNexus</span>
-        </span>
+        {GITNEXUS_ENABLED && (
+          <span className="flex items-center gap-1.5 text-[9px] tracking-wider text-white/40">
+            <Dot on={gitnexus} />
+            <span className={gitnexus ? 'text-white/50' : 'text-white/25'}>GitNexus</span>
+          </span>
+        )}
 
         {onOpenSettings && (
           <button
@@ -118,6 +135,18 @@ export default function StatusBar({ onOpenSettings, onOpenJarvisSettings }: Stat
             <span className="hidden sm:inline">JARVIS</span>
           </button>
         )}
+
+        {onOpenAiSettings && (
+          <button
+            type="button"
+            onClick={onOpenAiSettings}
+            className="flex items-center gap-1 text-[9px] tracking-wider text-white/30 hover:text-amber-400/80 transition-colors"
+            aria-label="AI settings"
+          >
+            <Cpu size={12} />
+            <span className="hidden sm:inline">AI</span>
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-4 text-[9px] tracking-wider text-white/30">
@@ -136,7 +165,10 @@ export default function StatusBar({ onOpenSettings, onOpenJarvisSettings }: Stat
         )}
         <span>
           Brain:{' '}
-          <span className={loading ? 'text-white/20' : 'text-amber-400/70'}>{brain}</span>
+          <span className={loading ? 'text-white/20' : 'text-amber-400/70'}>
+            {brainLabel}
+            {modelSuffix}
+          </span>
           {voiceReady && (
             <span className="text-white/20 hidden lg:inline"> · voice Jarvis</span>
           )}

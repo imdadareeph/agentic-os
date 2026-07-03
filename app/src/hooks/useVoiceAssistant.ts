@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { transcribeAudio } from '@/services/voice'
 import { respondWithVoice } from '@/services/jarvis'
-import { getRecorderMimeType } from '@/lib/audio'
+import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
 import type { VitalsResponse } from '@/types/vitals'
 
 export type VoicePhase = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
@@ -36,7 +36,7 @@ export function useVoiceAssistant(
   const chunksRef = useRef<Blob[]>([])
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
-  const rafRef = useRef<number>(0)
+  const stopMeterRef = useRef<(() => void) | null>(null)
 
   const isActive = phase === 'listening' || phase === 'processing' || phase === 'speaking'
 
@@ -45,21 +45,14 @@ export function useVoiceAssistant(
   }, [isActive, volume, onActivity])
 
   const stopVolumeLoop = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    stopMeterRef.current?.()
+    stopMeterRef.current = null
     setVolume(0)
   }, [])
 
   const startVolumeLoop = useCallback((analyser: AnalyserNode) => {
-    const data = new Uint8Array(analyser.frequencyBinCount)
-    const tick = () => {
-      analyser.getByteFrequencyData(data)
-      let sum = 0
-      for (let i = 0; i < data.length; i++) sum += data[i]
-      const avg = sum / data.length / 255
-      setVolume(Math.min(1, avg * 2.5))
-      rafRef.current = requestAnimationFrame(tick)
-    }
-    rafRef.current = requestAnimationFrame(tick)
+    stopMeterRef.current?.()
+    stopMeterRef.current = startMicLevelMeter(analyser, setVolume)
   }, [])
 
   const cleanupStream = useCallback(() => {
@@ -84,9 +77,9 @@ export function useVoiceAssistant(
 
       const audioCtx = new AudioContext()
       audioCtxRef.current = audioCtx
+      await audioCtx.resume()
       const source = audioCtx.createMediaStreamSource(stream)
       const analyser = audioCtx.createAnalyser()
-      analyser.fftSize = 256
       source.connect(analyser)
       analyserRef.current = analyser
       startVolumeLoop(analyser)

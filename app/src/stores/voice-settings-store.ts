@@ -6,7 +6,7 @@ import {
   type VoiceMode,
 } from '@/config/voice'
 
-export const VOICE_SETTINGS_SCHEMA_VERSION = 2
+export const VOICE_SETTINGS_SCHEMA_VERSION = 3
 const STORAGE_KEY = 'agentic-os-voice-settings'
 
 export interface VoiceSettings {
@@ -53,7 +53,14 @@ export function getDefaultVoiceSettings(): VoiceSettings {
 
 function migrate(stored: Partial<VoiceSettings>): VoiceSettings {
   const defaults = getDefaultVoiceSettings()
-  return { ...defaults, ...stored, schemaVersion: VOICE_SETTINGS_SCHEMA_VERSION }
+  const merged = { ...defaults, ...stored, schemaVersion: VOICE_SETTINGS_SCHEMA_VERSION }
+
+  if ((stored.schemaVersion ?? 0) < 3) {
+    merged.voiceboxEnabled = defaults.voiceboxEnabled
+    merged.voiceboxSttFallback = defaults.voiceboxSttFallback
+  }
+
+  return merged
 }
 
 export function loadVoiceSettings(): VoiceSettings {

@@ -30,7 +30,7 @@ export const VOICE_ENV_DEFAULTS = {
   sttFinalProvider: envString('VITE_STT_FINAL_PROVIDER', 'whisper') as SttFinalProvider,
   whisperBaseUrl: envString('VITE_WHISPER_BASE', '/whisper'),
   whisperModel: envString('VITE_WHISPER_MODEL', 'whisper-1'),
-  voiceboxSttFallback: true,
+  voiceboxSttFallback: envFlag('VITE_VOICEBOX_ENABLED', false),
   ttsProvider: envString('VITE_TTS_PROVIDER', 'browser') as TtsProvider,
   browserVoiceName: envString('VITE_TTS_VOICE', ''),
   ttsRate: envNumber('VITE_TTS_RATE', 1),

@@ -4,7 +4,7 @@ import {
   buildSystemPrompt,
   effectiveMaxTokens,
 } from '@/lib/jarvis-prompt'
-import { chatWithOllama } from '@/services/ollama'
+import { chatWithActiveProvider } from '@/services/llm/router'
 import { llmGenerate } from '@/services/voicebox'
 import { getJarvisSettings } from '@/stores/jarvis-settings-store'
 import { getVoiceSettings } from '@/stores/voice-settings-store'
@@ -21,22 +21,21 @@ export async function think(
   const messages = buildChatMessages(history, userMessage, system)
 
   try {
-    return await chatWithOllama({
+    return await chatWithActiveProvider({
       messages,
-      model: settings.ollamaModel || undefined,
       temperature: settings.temperature,
-      numPredict: effectiveMaxTokens(settings),
+      maxTokens: effectiveMaxTokens(settings),
       think: settings.deepThinking,
     })
-  } catch (ollamaErr) {
+  } catch (providerErr) {
     const voiceSettings = getVoiceSettings()
     if (voiceSettings.voiceboxEnabled) {
       return llmGenerate(userMessage, system)
     }
     const message =
-      ollamaErr instanceof Error ? ollamaErr.message : 'Ollama request failed'
+      providerErr instanceof Error ? providerErr.message : 'LLM request failed'
     throw new Error(
-      message.includes('Ollama') || message.includes('model') || message.includes('Deep thinking')
+      message.includes('model') || message.includes('Deep thinking') || message.includes('API key')
         ? message
         : `No LLM available — ${message}`
     )

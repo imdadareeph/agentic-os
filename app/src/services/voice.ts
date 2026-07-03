@@ -55,7 +55,7 @@ export async function getVoiceStatus(): Promise<VoiceServiceStatus> {
       sttModel = liveSttReady
         ? `Browser + Whisper ${whisperStatus.model}`
         : whisperStatus.model
-    } else if (settings.voiceboxSttFallback) {
+    } else if (settings.voiceboxEnabled && settings.voiceboxSttFallback) {
       const vb = await voiceboxSttReady()
       if (vb) {
         sttModel = liveSttReady ? `Browser + Voicebox ${vb.sttModel}` : vb.sttModel
@@ -88,7 +88,7 @@ export async function getVoiceStatus(): Promise<VoiceServiceStatus> {
     if (browserStatus.ready) {
       ttsReady = true
       ttsModel = browserStatus.model
-    } else {
+    } else if (settings.voiceboxEnabled) {
       const vb = await voiceboxTtsReady()
       if (vb) {
         ttsReady = true
@@ -98,6 +98,8 @@ export async function getVoiceStatus(): Promise<VoiceServiceStatus> {
       } else {
         ttsError = browserStatus.error
       }
+    } else {
+      ttsError = browserStatus.error
     }
   }
 
@@ -131,7 +133,7 @@ export async function transcribeAudio(blob: Blob): Promise<whisper.Transcription
 
   const cached = whisper.peekWhisperStatus()
   if (cached && !cached.online) {
-    if (settings.voiceboxSttFallback) {
+    if (settings.voiceboxEnabled && settings.voiceboxSttFallback) {
       const vb = await voiceboxSttReady()
       if (vb) return voicebox.transcribeAudio(blob)
     }
@@ -143,7 +145,7 @@ export async function transcribeAudio(blob: Blob): Promise<whisper.Transcription
   try {
     return await whisper.transcribeAudio(blob)
   } catch (primaryErr) {
-    if (settings.voiceboxSttFallback) {
+    if (settings.voiceboxEnabled && settings.voiceboxSttFallback) {
       const vb = await voiceboxSttReady()
       if (vb) return voicebox.transcribeAudio(blob)
     }
@@ -167,9 +169,11 @@ export async function speakText(text: string, profile?: string): Promise<void> {
   try {
     await browserTts.speakBrowser(text)
   } catch (primaryErr) {
-    const vb = await voiceboxTtsReady()
-    if (vb) {
-      return voicebox.speakText(text, profile ?? settings.voiceboxProfile)
+    if (settings.voiceboxEnabled) {
+      const vb = await voiceboxTtsReady()
+      if (vb) {
+        return voicebox.speakText(text, profile ?? settings.voiceboxProfile)
+      }
     }
     throw primaryErr
   }

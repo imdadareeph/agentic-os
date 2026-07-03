@@ -6,6 +6,7 @@ import RightPanel from '@/sections/RightPanel'
 import FeatureShowcase from '@/sections/FeatureShowcase'
 import VoiceSettingsSheet from '@/sections/VoiceSettingsSheet'
 import JarvisSettingsSheet from '@/sections/JarvisSettingsSheet'
+import AiSettingsSheet from '@/sections/AiSettingsSheet'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
 import type { VitalsResponse } from '@/types/vitals'
 
@@ -14,6 +15,7 @@ export default function App() {
   const [voiceVolume, setVoiceVolume] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [jarvisSettingsOpen, setJarvisSettingsOpen] = useState(false)
+  const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [inboxBriefOpen, setInboxBriefOpen] = useState(false)
   const { vitals, liveCount, loading, error, refresh, updatedAt } = useSystemVitals()
 
@@ -80,6 +82,7 @@ export default function App() {
         <StatusBar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenJarvisSettings={() => setJarvisSettingsOpen(true)}
+          onOpenAiSettings={() => setAiSettingsOpen(true)}
         />
       </div>
 
@@ -89,6 +92,7 @@ export default function App() {
         onOpenChange={setJarvisSettingsOpen}
         vitalsSnapshot={vitalsSnapshot}
       />
+      <AiSettingsSheet open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
 
       {/* Feature Showcase — Scrolls over the hero */}
       <FeatureShowcase />

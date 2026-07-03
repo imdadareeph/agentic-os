@@ -1,6 +1,5 @@
-import { VOICE_CONFIG } from '@/config/voice'
-
-const VOICEBOX_BASE = VOICE_CONFIG.voicebox.baseUrl
+import { VOICE_CONFIG, isVoiceboxEnabled } from '@/config/voice'
+import { getVoiceSettings } from '@/stores/voice-settings-store'
 import { fetchWithTimeout } from '@/lib/fetch'
 import { recordingBlobToWav } from '@/lib/audio'
 import {
@@ -8,6 +7,8 @@ import {
   isGenerationFailed,
   parseVoiceboxEventBody,
 } from '@/lib/sse'
+
+const VOICEBOX_BASE = VOICE_CONFIG.voicebox.baseUrl
 
 export interface VoiceboxHealth {
   status: string
@@ -58,6 +59,17 @@ export async function getVoiceboxStatus(): Promise<VoiceboxServiceStatus> {
     ttsReady: false,
     error,
   })
+
+  const settings = getVoiceSettings()
+  const shouldProbe =
+    isVoiceboxEnabled() &&
+    (settings.voiceboxEnabled ||
+      settings.sttFinalProvider === 'voicebox' ||
+      settings.ttsProvider === 'voicebox')
+
+  if (!shouldProbe) {
+    return fail('Voicebox disabled')
+  }
 
   try {
     const [healthRes, readyRes, modelsRes] = await Promise.allSettled([
