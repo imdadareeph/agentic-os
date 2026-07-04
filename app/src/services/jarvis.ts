@@ -14,7 +14,8 @@ import { speakText } from '@/services/voice'
 export async function think(
   userMessage: string,
   history: ConversationTurn[] = [],
-  vitals?: VitalsResponse | null
+  vitals?: VitalsResponse | null,
+  signal?: AbortSignal
 ): Promise<string> {
   const settings = getJarvisSettings()
   const system = buildSystemPrompt(settings, vitals)
@@ -26,6 +27,7 @@ export async function think(
       temperature: settings.temperature,
       maxTokens: effectiveMaxTokens(settings),
       think: settings.deepThinking,
+      signal,
     })
   } catch (providerErr) {
     const voiceSettings = getVoiceSettings()

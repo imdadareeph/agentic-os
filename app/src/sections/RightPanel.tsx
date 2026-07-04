@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Mic, MicOff, Activity, Loader2, MessageCircle } from 'lucide-react'
-import { useVoiceAssistant, type VoicePhase } from '@/hooks/useVoiceAssistant'
-import {
-  useRealtimeConversation,
-  type ConversationPhase,
-} from '@/hooks/useRealtimeConversation'
+import { Mic, MicOff, Activity, Loader2, MessageCircle, Pause } from 'lucide-react'
+import { useVoiceAssistant } from '@/hooks/useVoiceAssistant'
+import { useRealtimeConversation } from '@/hooks/useRealtimeConversation'
 import { useJarvisAmbient } from '@/hooks/useJarvisAmbient'
 import { useVoiceSettings } from '@/stores/voice-settings-store'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
+import {
+  getJarvisStatusLabel,
+  isJarvisSessionOpen,
+  resolveJarvisDisplayStatus,
+  type JarvisDisplayStatus,
+} from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
 
 const commands = [
@@ -30,6 +33,11 @@ interface AudioBar {
 
 interface RightPanelProps {
   onVoiceToggle?: (active: boolean, volume: number) => void
+  onJarvisStatusChange?: (
+    status: JarvisDisplayStatus,
+    voiceMode: 'conversation' | 'push',
+    sessionOpen: boolean
+  ) => void
   inboxBriefOpen?: boolean
   onInboxBriefToggle?: () => void
   onMetricsPull?: () => void
@@ -37,40 +45,9 @@ interface RightPanelProps {
   vitalsSnapshot?: VitalsResponse | null
 }
 
-function pushPhaseLabel(phase: VoicePhase): string {
-  switch (phase) {
-    case 'listening':
-      return 'LISTENING'
-    case 'processing':
-      return 'TRANSCRIBING'
-    case 'speaking':
-      return 'JARVIS'
-    case 'error':
-      return 'ERROR'
-    default:
-      return 'STANDBY'
-  }
-}
-
-function convoPhaseLabel(phase: ConversationPhase): string {
-  switch (phase) {
-    case 'listening':
-      return 'LISTENING'
-    case 'refining':
-      return 'REFINING'
-    case 'thinking':
-      return 'THINKING'
-    case 'speaking':
-      return 'JARVIS'
-    case 'error':
-      return 'ERROR'
-    default:
-      return 'STANDBY'
-  }
-}
-
 export default function RightPanel({
   onVoiceToggle,
+  onJarvisStatusChange,
   inboxBriefOpen = false,
   onInboxBriefToggle,
   onMetricsPull,
@@ -105,30 +82,49 @@ export default function RightPanel({
   const phaseRef = useRef(phase)
   phaseRef.current = phase
   const isActive = isConversation ? convo.isActive : push.isActive
-  const phaseText = isConversation ? convoPhaseLabel(convo.phase) : pushPhaseLabel(push.phase)
   const displayError = isConversation ? convo.error : push.error
 
+  const statusInput = {
+    voiceMode: settings.voiceMode,
+    conversationActive: convo.conversationActive,
+    conversationPaused: convo.conversationPaused,
+    phase,
+  }
+  const displayStatus = resolveJarvisDisplayStatus(statusInput)
+  const phaseText = getJarvisStatusLabel(displayStatus)
+
   const isBusy =
-    phase === 'processing' ||
-    phase === 'refining' ||
-    phase === 'thinking' ||
-    phase === 'speaking'
+    !convo.conversationPaused &&
+    (phase === 'processing' ||
+      phase === 'refining' ||
+      phase === 'thinking' ||
+      phase === 'speaking')
+
+  const sessionOpen = isJarvisSessionOpen(statusInput)
 
   const showWaveform =
-    phase === 'listening' || phase === 'speaking' || (isConversation && convo.conversationActive)
+    !convo.conversationPaused &&
+    (phase === 'listening' ||
+      phase === 'speaking' ||
+      (isConversation && convo.conversationActive))
 
   const canUseVoice = !healthLoading && voice.sttReady && voice.ttsReady && brain.online
 
   const sessionActive = isConversation
-    ? convo.conversationActive
+    ? convo.conversationActive || convo.conversationPaused
     : push.phase !== 'idle'
 
   useJarvisAmbient({
     sessionActive,
     phase,
+    conversationPaused: convo.conversationPaused,
     enabled: settings.ambientMusicEnabled,
     baseVolume: settings.ambientMusicVolume,
   })
+
+  useEffect(() => {
+    onJarvisStatusChange?.(displayStatus, settings.voiceMode, sessionOpen)
+  }, [displayStatus, settings.voiceMode, sessionOpen, onJarvisStatusChange])
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000)
@@ -218,6 +214,9 @@ export default function RightPanel({
     }
   }, [isConversation, push])
 
+  const inConversationSession =
+    isConversation && (convo.conversationActive || convo.conversationPaused)
+
   return (
     <div className="h-full border-l border-white/15 flex flex-col overflow-hidden">
       <div className="p-5 border-b border-white/15 text-right animate-fade-in">
@@ -291,7 +290,7 @@ export default function RightPanel({
           <span className="text-label">JARVIS Voice</span>
           <span
             className={`text-[9px] font-mono flex items-center gap-1 ${
-              isActive ? 'text-amber-400' : 'text-white/20'
+              isActive ? 'text-amber-400' : displayStatus === 'paused' ? 'text-amber-400/70' : 'text-white/20'
             }`}
           >
             {isBusy ? (
@@ -322,28 +321,32 @@ export default function RightPanel({
           <div className="flex gap-1.5">
             <button
               onClick={() => void convo.toggleConversation()}
-              disabled={!canUseVoice && !convo.conversationActive}
+              disabled={!canUseVoice && !inConversationSession}
               className={`
                 flex-1 py-3 border flex items-center justify-center gap-2
                 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed
-                ${convo.conversationActive
+                ${inConversationSession
                   ? 'border-amber-400/60 bg-amber-400/10 text-amber-300'
                   : 'border-white/10 text-white/30 hover:border-white/30 hover:text-white/60 hover:bg-white/5'
                 }
               `}
             >
-              <MessageCircle size={14} className={convo.conversationActive ? 'animate-pulse' : ''} />
+              <MessageCircle size={14} className={inConversationSession ? 'animate-pulse' : ''} />
               <span className="text-[10px] tracking-widest uppercase">
-                {convo.conversationActive ? 'End' : 'Start'}
+                {inConversationSession ? 'End' : 'Start'}
               </span>
             </button>
-            {convo.conversationActive && (
+            {inConversationSession && (
               <button
-                onClick={convo.sendNow}
-                disabled={isBusy}
-                className="px-4 py-3 border border-white/10 text-white/30 hover:border-amber-400/40 hover:text-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-[10px] tracking-widest uppercase"
+                onClick={() =>
+                  convo.conversationPaused
+                    ? convo.resumeConversation()
+                    : convo.pauseConversation()
+                }
+                className="px-4 py-3 border border-white/10 text-white/30 hover:border-amber-400/40 hover:text-amber-300 text-[10px] tracking-widest uppercase flex items-center gap-1.5"
               >
-                Send
+                <Pause size={12} />
+                {convo.conversationPaused ? 'Resume' : 'Pause'}
               </button>
             )}
           </div>
@@ -388,11 +391,17 @@ export default function RightPanel({
         )}
 
         <div className="mt-4 flex-1 overflow-y-auto scrollbar-jarvis space-y-3 text-[10px] leading-relaxed min-h-0">
-          {isConversation && convo.phase === 'thinking' && (
+          {convo.conversationPaused && isConversation && (
+            <p className="text-amber-400/50 text-[9px] uppercase tracking-widest text-center">
+              Paused — tap Resume to continue
+            </p>
+          )}
+
+          {isConversation && convo.phase === 'thinking' && !convo.conversationPaused && (
             <p className="text-white/25 italic animate-pulse">JARVIS is thinking…</p>
           )}
 
-          {isConversation && convo.interimTranscript && (
+          {isConversation && convo.interimTranscript && !convo.conversationPaused && (
             <p className="text-white/30 italic">{convo.interimTranscript}</p>
           )}
 
@@ -439,7 +448,7 @@ export default function RightPanel({
           )}
         </div>
 
-        {(phase === 'listening' || (isConversation && convo.conversationActive)) && (
+        {showWaveform && (
           <div className="mt-3">
             <div className="text-[9px] text-white/20 uppercase tracking-wider text-center">
               Input Level

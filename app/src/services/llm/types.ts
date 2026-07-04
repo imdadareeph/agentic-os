@@ -13,6 +13,7 @@ export interface ChatOptions {
   think?: boolean
   baseUrl: string
   apiKey?: string
+  signal?: AbortSignal
 }
 
 export interface ProviderHealth {

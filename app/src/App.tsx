@@ -8,11 +8,14 @@ import VoiceSettingsSheet from '@/sections/VoiceSettingsSheet'
 import JarvisSettingsSheet from '@/sections/JarvisSettingsSheet'
 import AiSettingsSheet from '@/sections/AiSettingsSheet'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
+import type { JarvisDisplayStatus } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
 
 export default function App() {
-  const [voiceActive, setVoiceActive] = useState(false)
   const [voiceVolume, setVoiceVolume] = useState(0)
+  const [jarvisStatus, setJarvisStatus] = useState<JarvisDisplayStatus>('sleeping')
+  const [voiceMode, setVoiceMode] = useState<'conversation' | 'push'>('conversation')
+  const [sessionActive, setSessionActive] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [jarvisSettingsOpen, setJarvisSettingsOpen] = useState(false)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
@@ -23,10 +26,18 @@ export default function App() {
     ? { updatedAt, vitals, liveCount }
     : null
 
-  const handleVoiceToggle = useCallback((active: boolean, volume: number) => {
-    setVoiceActive(active)
+  const handleVoiceToggle = useCallback((_active: boolean, volume: number) => {
     setVoiceVolume(volume)
   }, [])
+
+  const handleJarvisStatusChange = useCallback(
+    (status: JarvisDisplayStatus, mode: 'conversation' | 'push', sessionOpen: boolean) => {
+      setJarvisStatus(status)
+      setVoiceMode(mode)
+      setSessionActive(sessionOpen)
+    },
+    []
+  )
 
   const toggleInboxBrief = useCallback(() => {
     setInboxBriefOpen(prev => !prev)
@@ -48,7 +59,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#050505] text-white">
-      {/* Hero Dashboard — Fixed height, sticky */}
       <div className="sticky top-0 h-screen z-10 flex flex-col bg-[#050505]">
         <div className="flex-1 min-h-0 grid grid-cols-[280px_1fr_280px]">
           <div className="hidden lg:block h-full overflow-hidden">
@@ -62,8 +72,10 @@ export default function App() {
 
           <div className="h-full overflow-hidden">
             <CenterPanel
-              isSpeaking={voiceActive}
+              jarvisStatus={jarvisStatus}
               volume={voiceVolume}
+              voiceMode={voiceMode}
+              sessionActive={sessionActive}
               inboxBriefOpen={inboxBriefOpen}
             />
           </div>
@@ -71,6 +83,7 @@ export default function App() {
           <div className="hidden lg:block h-full overflow-hidden">
             <RightPanel
               onVoiceToggle={handleVoiceToggle}
+              onJarvisStatusChange={handleJarvisStatusChange}
               inboxBriefOpen={inboxBriefOpen}
               onInboxBriefToggle={toggleInboxBrief}
               onMetricsPull={() => void refresh()}
@@ -94,7 +107,6 @@ export default function App() {
       />
       <AiSettingsSheet open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
 
-      {/* Feature Showcase — Scrolls over the hero */}
       <FeatureShowcase />
     </div>
   )

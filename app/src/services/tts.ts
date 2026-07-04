@@ -45,6 +45,18 @@ export function getBrowserTtsStatus(): TtsStatus {
   }
 }
 
+export function cancelBrowserSpeech(): void {
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    speechSynthesis.cancel()
+  }
+  if (activeSpeakReject) {
+    activeSpeakReject(new DOMException('Speech cancelled', 'AbortError'))
+    activeSpeakReject = null
+  }
+}
+
+let activeSpeakReject: ((err: Error) => void) | null = null
+
 export function speakBrowser(text: string): Promise<void> {
   const { browserVoiceName, ttsRate, ttsPitch } = getVoiceSettings()
 
@@ -55,6 +67,7 @@ export function speakBrowser(text: string): Promise<void> {
     }
 
     speechSynthesis.cancel()
+    activeSpeakReject = reject
 
     const utterance = new SpeechSynthesisUtterance(text.slice(0, 10_000))
     utterance.rate = Number.isFinite(ttsRate) ? ttsRate : 1
@@ -71,8 +84,14 @@ export function speakBrowser(text: string): Promise<void> {
       speechSynthesis.addEventListener('voiceschanged', assignVoice, { once: true })
     }
 
-    utterance.onend = () => resolve()
-    utterance.onerror = () => reject(new Error('Speech playback failed'))
+    utterance.onend = () => {
+      activeSpeakReject = null
+      resolve()
+    }
+    utterance.onerror = () => {
+      activeSpeakReject = null
+      reject(new Error('Speech playback failed'))
+    }
 
     speechSynthesis.speak(utterance)
   })

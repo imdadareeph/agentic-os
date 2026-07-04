@@ -1,4 +1,4 @@
-import { fetchWithTimeout } from '@/lib/fetch'
+import { fetchWithTimeout, fetchWithTimeoutAndSignal } from '@/lib/fetch'
 import type { ChatOptions } from '@/services/llm/types'
 
 const modelCache = new Map<string, string>()
@@ -60,14 +60,15 @@ export async function chatWithOllamaProvider(options: ChatOptions): Promise<stri
     body.options = ollamaOptions
   }
 
-  const res = await fetchWithTimeout(
+  const res = await fetchWithTimeoutAndSignal(
     `${baseUrl}/api/chat`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    120_000
+    120_000,
+    options.signal
   )
 
   if (!res.ok) {

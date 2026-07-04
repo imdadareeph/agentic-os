@@ -1,48 +1,49 @@
-import { useState, useEffect } from 'react'
 import { Zap, Radio } from 'lucide-react'
 import NeuralSphere from '@/components/NeuralSphere'
+import type { VoiceMode } from '@/config/voice'
+import {
+  getJarvisStatusLabel,
+  JARVIS_STATUS_CONFIG,
+  type JarvisDisplayStatus,
+} from '@/lib/jarvis-status'
 
 const statusItems = ['CORE', 'WORKING', 'LINK', 'ONLINE', 'RUNNER', 'ALIVE']
 
 interface CenterPanelProps {
-  isSpeaking?: boolean
+  jarvisStatus: JarvisDisplayStatus
   volume?: number
+  voiceMode?: VoiceMode
+  sessionActive?: boolean
   inboxBriefOpen?: boolean
 }
 
 export default function CenterPanel({
-  isSpeaking = false,
+  jarvisStatus,
   volume = 0,
+  voiceMode = 'conversation',
+  sessionActive = false,
   inboxBriefOpen = false,
 }: CenterPanelProps) {
-  const [views, setViews] = useState(9499)
-
-  // Simulate view count changes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setViews(prev => prev + Math.floor(Math.random() * 5))
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Simulated velocity metrics
-  const velocity = (views / 1000).toFixed(1)
-  const spotlight = '25M'
+  const config = JARVIS_STATUS_CONFIG[jarvisStatus]
+  const { Icon } = config
+  const label = getJarvisStatusLabel(jarvisStatus)
+  const sphereActive =
+    jarvisStatus === 'speaking' || jarvisStatus === 'listening'
+  const barWidth =
+    jarvisStatus === 'listening' || jarvisStatus === 'speaking'
+      ? `${Math.max(8, volume * 100)}%`
+      : '33%'
+  const modeLabel = voiceMode === 'conversation' ? 'Conversation' : 'Push-to-talk'
+  const sessionLabel = sessionActive ? 'Active' : 'Standby'
 
   return (
     <div className="relative h-full flex flex-col">
-      {/* 3D Neural Sphere Background */}
-      <NeuralSphere isSpeaking={isSpeaking} volume={volume} />
+      <NeuralSphere
+        isSpeaking={sphereActive}
+        isPaused={jarvisStatus === 'paused'}
+        volume={volume}
+      />
 
-      {/* Speaking indicator */}
-      {isSpeaking && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 px-3 py-1 border border-amber-400/30 bg-amber-400/5">
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-[9px] tracking-[0.15em] text-amber-300 uppercase">Voice Active</span>
-        </div>
-      )}
-
-      {/* Top Status Bar */}
       <div className="relative z-10 flex items-center justify-between px-6 py-3 border-b border-white/15">
         <div className="flex items-center gap-4">
           {statusItems.map((item, i) => (
@@ -62,7 +63,6 @@ export default function CenterPanel({
         </div>
       </div>
 
-      {/* Center Content Overlay */}
       <div className="relative z-10 flex-1 flex items-center justify-center">
         {inboxBriefOpen && (
           <div
@@ -89,25 +89,33 @@ export default function CenterPanel({
         )}
       </div>
 
-      {/* Bottom Primary Display */}
       <div className="relative z-10 pb-8 pt-4 border-t border-white/5">
         <div className="text-center animate-fade-in stagger-5">
-          <div className="text-[9px] tracking-[0.3em] text-white/20 uppercase mb-2">
+          <div className="text-[9px] tracking-[0.3em] text-white/20 uppercase mb-4">
             Primary Directive — Live Display
           </div>
-          <div className="flex items-baseline justify-center gap-3">
-            <span className="text-6xl font-light font-mono-data text-white tracking-tight glow-amber-subtle">
-              {views.toLocaleString()}
+          <div className="flex flex-col items-center justify-center gap-3">
+            <Icon
+              size={32}
+              className={`${config.accentClass} ${config.pulse ? 'animate-pulse' : ''}`}
+              strokeWidth={1.5}
+            />
+            <span
+              className={`text-4xl font-light tracking-[0.25em] uppercase glow-amber-subtle ${config.accentClass}`}
+            >
+              {label}
             </span>
-            <span className="text-sm tracking-[0.2em] text-white/30 uppercase">Views</span>
           </div>
           <div className="mt-4 flex items-center justify-center gap-6 text-[9px] text-white/20">
-            <span>VELOCITY {velocity}K/DAY</span>
+            <span>Session · {sessionLabel}</span>
             <span className="text-white/10">|</span>
-            <span>SPOTLIGHT {spotlight} LEFT</span>
+            <span>Mode · {modeLabel}</span>
           </div>
           <div className="mt-3 mx-auto w-48 h-[1px] bg-white/10 relative overflow-hidden">
-            <div className="absolute inset-y-0 left-0 bg-amber-400/50 w-1/3" />
+            <div
+              className="absolute inset-y-0 left-0 bg-amber-400/50 transition-all duration-150"
+              style={{ width: barWidth }}
+            />
           </div>
         </div>
       </div>

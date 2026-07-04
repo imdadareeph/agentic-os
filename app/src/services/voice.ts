@@ -178,3 +178,9 @@ export async function speakText(text: string, profile?: string): Promise<void> {
     throw primaryErr
   }
 }
+
+/** Stop any in-flight TTS (browser + Voicebox). */
+export function cancelSpeech(): void {
+  browserTts.cancelBrowserSpeech()
+  voicebox.cancelVoiceboxSpeech()
+}

@@ -1,6 +1,6 @@
 import { VOICE_CONFIG, isVoiceboxEnabled } from '@/config/voice'
 import { getVoiceSettings } from '@/stores/voice-settings-store'
-import { fetchWithTimeout } from '@/lib/fetch'
+import { fetchWithTimeout, fetchWithTimeoutAndSignal } from '@/lib/fetch'
 import { recordingBlobToWav } from '@/lib/audio'
 import {
   isGenerationComplete,
@@ -183,14 +183,31 @@ interface GenerationStatus {
   error?: string | null
 }
 
-async function waitForGeneration(id: string, timeoutMs = 120_000): Promise<void> {
+let activeSpeakAbort: AbortController | null = null
+
+/** Best-effort — server-side audio may finish one buffer after cancel. */
+export function cancelVoiceboxSpeech(): void {
+  activeSpeakAbort?.abort()
+  activeSpeakAbort = null
+}
+
+async function waitForGeneration(
+  id: string,
+  timeoutMs = 120_000,
+  signal?: AbortSignal
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const statusRes = await fetchWithTimeout(
+    if (signal?.aborted) {
+      throw new DOMException('Speech cancelled', 'AbortError')
+    }
+
+    const statusRes = await fetchWithTimeoutAndSignal(
       `${VOICEBOX_BASE}/generate/${id}/status`,
       { headers: { Accept: 'text/event-stream, application/json' } },
-      30_000
+      30_000,
+      signal
     )
 
     if (!statusRes.ok) break
@@ -210,34 +227,45 @@ async function waitForGeneration(id: string, timeoutMs = 120_000): Promise<void>
 }
 
 export async function speakText(text: string, profile?: string): Promise<void> {
-  const res = await fetchWithTimeout(
-    `${VOICEBOX_BASE}/speak`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: text.slice(0, 10000),
-        profile: profile ?? undefined,
-        language: 'en',
-      }),
-    },
-    30_000
-  )
+  activeSpeakAbort?.abort()
+  const controller = new AbortController()
+  activeSpeakAbort = controller
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(
-      res.status === 502 || res.status === 503
-        ? 'TTS offline — open Voicebox Models tab and load a TTS model'
-        : `Speech failed: ${err}`
+  try {
+    const res = await fetchWithTimeoutAndSignal(
+      `${VOICEBOX_BASE}/speak`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: text.slice(0, 10000),
+          profile: profile ?? undefined,
+          language: 'en',
+        }),
+      },
+      30_000,
+      controller.signal
     )
+
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(
+        res.status === 502 || res.status === 503
+          ? 'TTS offline — open Voicebox Models tab and load a TTS model'
+          : `Speech failed: ${err}`
+      )
+    }
+
+    const initial = (await res.json()) as GenerationStatus & { id: string }
+    if (isGenerationComplete(initial.status)) return
+    if (!initial.id) return
+
+    await waitForGeneration(initial.id, 120_000, controller.signal)
+  } finally {
+    if (activeSpeakAbort === controller) {
+      activeSpeakAbort = null
+    }
   }
-
-  const initial = (await res.json()) as GenerationStatus & { id: string }
-  if (isGenerationComplete(initial.status)) return
-  if (!initial.id) return
-
-  await waitForGeneration(initial.id)
 }
 
 export async function llmGenerate(prompt: string, system?: string): Promise<string> {

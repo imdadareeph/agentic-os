@@ -1,4 +1,4 @@
-import { fetchWithTimeout } from '@/lib/fetch'
+import { fetchWithTimeout, fetchWithTimeoutAndSignal } from '@/lib/fetch'
 import type { ChatOptions } from '@/services/llm/types'
 
 export async function checkGeminiHealth(baseUrl: string, apiKey: string): Promise<boolean> {
@@ -56,14 +56,15 @@ export async function chatWithGeminiProvider(options: ChatOptions): Promise<stri
   const modelPath = model.startsWith('models/') ? model : `models/${model}`
   const url = `${baseUrl}/v1beta/${modelPath}:generateContent?key=${encodeURIComponent(apiKey)}`
 
-  const res = await fetchWithTimeout(
+  const res = await fetchWithTimeoutAndSignal(
     url,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     },
-    120_000
+    120_000,
+    options.signal
   )
 
   if (!res.ok) {

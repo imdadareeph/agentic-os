@@ -1,4 +1,4 @@
-import { fetchWithTimeout } from '@/lib/fetch'
+import { fetchWithTimeout, fetchWithTimeoutAndSignal } from '@/lib/fetch'
 import type { ChatOptions } from '@/services/llm/types'
 
 export async function checkAnthropicHealth(
@@ -60,7 +60,7 @@ export async function chatWithAnthropicProvider(options: ChatOptions): Promise<s
     body.temperature = options.temperature
   }
 
-  const res = await fetchWithTimeout(
+  const res = await fetchWithTimeoutAndSignal(
     `${baseUrl}/v1/messages`,
     {
       method: 'POST',
@@ -72,7 +72,8 @@ export async function chatWithAnthropicProvider(options: ChatOptions): Promise<s
       },
       body: JSON.stringify(body),
     },
-    120_000
+    120_000,
+    options.signal
   )
 
   if (!res.ok) {

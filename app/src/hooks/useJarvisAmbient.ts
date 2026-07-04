@@ -1,15 +1,20 @@
 import { useEffect } from 'react'
-import type { ConversationPhase } from '@/hooks/useRealtimeConversation'
-import type { VoicePhase } from '@/hooks/useVoiceAssistant'
 import {
   setJarvisAmbientVolume,
   startJarvisAmbient,
   stopJarvisAmbient,
 } from '@/lib/jarvis-ambient'
+import type { ConversationPhase } from '@/hooks/useRealtimeConversation'
+import type { VoicePhase } from '@/hooks/useVoiceAssistant'
 
 type JarvisPhase = ConversationPhase | VoicePhase
 
-function effectiveVolume(baseVolume: number, phase: JarvisPhase): number {
+function effectiveVolume(
+  baseVolume: number,
+  phase: JarvisPhase,
+  conversationPaused: boolean
+): number {
+  if (conversationPaused) return baseVolume
   switch (phase) {
     case 'listening':
     case 'processing':
@@ -27,6 +32,7 @@ function effectiveVolume(baseVolume: number, phase: JarvisPhase): number {
 interface UseJarvisAmbientOptions {
   sessionActive: boolean
   phase: JarvisPhase
+  conversationPaused?: boolean
   enabled: boolean
   baseVolume: number
 }
@@ -34,6 +40,7 @@ interface UseJarvisAmbientOptions {
 export function useJarvisAmbient({
   sessionActive,
   phase,
+  conversationPaused = false,
   enabled,
   baseVolume,
 }: UseJarvisAmbientOptions): void {
@@ -43,7 +50,7 @@ export function useJarvisAmbient({
       return
     }
 
-    void startJarvisAmbient(effectiveVolume(baseVolume, phase))
+    void startJarvisAmbient(effectiveVolume(baseVolume, phase, conversationPaused))
 
     return () => {
       stopJarvisAmbient()
@@ -52,6 +59,6 @@ export function useJarvisAmbient({
 
   useEffect(() => {
     if (!enabled || !sessionActive) return
-    setJarvisAmbientVolume(effectiveVolume(baseVolume, phase))
-  }, [enabled, sessionActive, phase, baseVolume])
+    setJarvisAmbientVolume(effectiveVolume(baseVolume, phase, conversationPaused))
+  }, [enabled, sessionActive, phase, conversationPaused, baseVolume])
 }

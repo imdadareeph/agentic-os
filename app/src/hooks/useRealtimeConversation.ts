@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
+import { isAbortError } from '@/lib/fetch'
 import { think } from '@/services/jarvis'
-import { speakText, transcribeAudio } from '@/services/voice'
+import { cancelSpeech, speakText, transcribeAudio } from '@/services/voice'
 import { peekWhisperStatus } from '@/services/whisper'
 import {
   startContinuousRecognition,
@@ -29,6 +30,7 @@ export interface ConversationTurn {
 
 export interface RealtimeConversationState {
   conversationActive: boolean
+  conversationPaused: boolean
   phase: ConversationPhase
   volume: number
   interimTranscript: string
@@ -39,7 +41,8 @@ export interface RealtimeConversationState {
   startConversation: () => Promise<void>
   stopConversation: () => void
   toggleConversation: () => Promise<void>
-  sendNow: () => void
+  pauseConversation: () => void
+  resumeConversation: () => void
   clearSession: () => void
 }
 
@@ -55,6 +58,7 @@ export function useRealtimeConversation(
   const vitalsRef = useRef(vitalsSnapshot)
   vitalsRef.current = vitalsSnapshot ?? null
   const [conversationActive, setConversationActive] = useState(false)
+  const [conversationPaused, setConversationPaused] = useState(false)
   const [phase, setPhase] = useState<ConversationPhase>('idle')
   const [volume, setVolume] = useState(0)
   const [interimTranscript, setInterimTranscript] = useState('')
@@ -72,6 +76,8 @@ export function useRealtimeConversation(
   const interimRef = useRef('')
   const processingRef = useRef(false)
   const activeRef = useRef(false)
+  const pausedRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
   const turnsRef = useRef<ConversationTurn[]>([])
 
   useEffect(() => {
@@ -80,6 +86,7 @@ export function useRealtimeConversation(
 
   const isActive =
     conversationActive &&
+    !conversationPaused &&
     (phase === 'listening' || phase === 'refining' || phase === 'thinking' || phase === 'speaking')
 
   const canStart = isSpeechRecognitionSupported()
@@ -190,13 +197,28 @@ export function useRealtimeConversation(
     stopRecognitionRef.current = null
   }, [])
 
+  const interruptActiveWork = useCallback(() => {
+    clearSilenceTimer()
+    stopRecognition()
+    abortRef.current?.abort()
+    abortRef.current = null
+    cancelSpeech()
+    processingRef.current = false
+    setInterimTranscript('')
+    turnTextRef.current = ''
+    interimRef.current = ''
+    lastInterimRef.current = ''
+  }, [clearSilenceTimer, stopRecognition])
+
   const lastInterimRef = useRef('')
   const scheduleTurnEnd = useCallback(
     (delayMs?: number) => {
+      if (pausedRef.current) return
       clearSilenceTimer()
       const cfg = getVoiceSettings()
       const wait = delayMs ?? cfg.turnSilenceMs
       silenceTimerRef.current = setTimeout(() => {
+        if (pausedRef.current) return
         const combined = `${turnTextRef.current} ${interimRef.current}`.trim()
         if (combined) void processTurnRef.current?.(combined)
       }, wait)
@@ -205,13 +227,13 @@ export function useRealtimeConversation(
   )
 
   const beginRecognition = useCallback(() => {
-    if (!activeRef.current) return
+    if (!activeRef.current || pausedRef.current) return
     stopRecognition()
     lastInterimRef.current = ''
 
     stopRecognitionRef.current = startContinuousRecognition({
       onInterim: text => {
-        if (processingRef.current) return
+        if (processingRef.current || pausedRef.current) return
         if (text === lastInterimRef.current) return
         lastInterimRef.current = text
         interimRef.current = text
@@ -220,25 +242,24 @@ export function useRealtimeConversation(
         scheduleTurnEnd()
       },
       onFinal: text => {
-        if (processingRef.current) return
+        if (processingRef.current || pausedRef.current) return
         turnTextRef.current = `${turnTextRef.current} ${text}`.trim()
         interimRef.current = ''
         lastInterimRef.current = ''
         setInterimTranscript('')
         ensureRecording()
-        // Final segments mean the user paused — commit quickly
         scheduleTurnEnd(350)
       },
       onError: msg => {
-        if (activeRef.current && !processingRef.current) setError(msg)
+        if (activeRef.current && !processingRef.current && !pausedRef.current) setError(msg)
       },
       onEnd: () => {},
     })
   }, [ensureRecording, scheduleTurnEnd, stopRecognition])
 
   const resumeListening = useCallback(() => {
-    if (!activeRef.current) {
-      setPhase('idle')
+    if (!activeRef.current || pausedRef.current) {
+      if (!activeRef.current) setPhase('idle')
       return
     }
     setPhase('listening')
@@ -248,7 +269,7 @@ export function useRealtimeConversation(
   const processTurnRef = useRef<(text: string) => Promise<void>>(async () => {})
 
   processTurnRef.current = async (browserText: string) => {
-    if (processingRef.current || !activeRef.current) return
+    if (processingRef.current || !activeRef.current || pausedRef.current) return
     const cfg = getVoiceSettings()
     const trimmed = browserText.trim()
     if (trimmed.length < cfg.minTurnChars) {
@@ -264,6 +285,10 @@ export function useRealtimeConversation(
     interimRef.current = ''
     turnTextRef.current = ''
     lastInterimRef.current = ''
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
 
     const turnId = newTurnId()
     setTurns(prev => [
@@ -281,20 +306,20 @@ export function useRealtimeConversation(
         ? turnsRef.current.slice(-memoryCount * 2)
         : []
 
-    // Refine in background — never block JARVIS from replying
     void (async () => {
       const whisperOnline = peekWhisperStatus()?.online === true
       const shouldRefine =
         cfg.whisperRefine &&
         (cfg.sttFinalProvider === 'voicebox' || whisperOnline)
 
-      if (!shouldRefine) return
+      if (!shouldRefine || pausedRef.current) return
 
       const blob = await stopRecorder()
-      if (!blob || blob.size <= 1000) return
+      if (!blob || blob.size <= 1000 || pausedRef.current) return
 
       try {
         const refined = await transcribeAudio(blob)
+        if (pausedRef.current) return
         const whisperText = refined.text.trim()
         if (whisperText && whisperText !== finalText) {
           setTurns(prev =>
@@ -307,7 +332,9 @@ export function useRealtimeConversation(
     })()
 
     try {
-      const reply = await think(finalText, history, vitalsRef.current)
+      const reply = await think(finalText, history, vitalsRef.current, controller.signal)
+      if (pausedRef.current || controller.signal.aborted) return
+
       setTurns(prev => [
         ...prev,
         { id: newTurnId(), role: 'assistant', text: reply, timestamp: Date.now() },
@@ -316,19 +343,24 @@ export function useRealtimeConversation(
       try {
         await speakText(reply, cfg.voiceboxProfile)
       } catch (speakErr) {
+        if (isAbortError(speakErr) || pausedRef.current) return
         setError(
           speakErr instanceof Error
             ? speakErr.message
             : 'Speech playback failed — check Voice Settings'
         )
       }
-      resumeListening()
+      if (!pausedRef.current) resumeListening()
     } catch (err) {
+      if (isAbortError(err) || pausedRef.current) return
       const message = err instanceof Error ? err.message : 'Conversation failed'
       setError(message)
       resumeListening()
     } finally {
       processingRef.current = false
+      if (abortRef.current === controller) {
+        abortRef.current = null
+      }
     }
   }
 
@@ -344,6 +376,8 @@ export function useRealtimeConversation(
     turnTextRef.current = ''
     interimRef.current = ''
     processingRef.current = false
+    pausedRef.current = false
+    setConversationPaused(false)
     activeRef.current = true
     setConversationActive(true)
     setPhase('listening')
@@ -352,7 +386,6 @@ export function useRealtimeConversation(
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream
 
-      // Start live STT before any other audio processing on this stream.
       beginRecognition()
 
       const audioCtx = new AudioContext()
@@ -374,30 +407,41 @@ export function useRealtimeConversation(
     }
   }, [beginRecognition, canStart, cleanupMedia, stopRecognition])
 
-  const stopConversation = useCallback(() => {
-    activeRef.current = false
-    setConversationActive(false)
-    clearSilenceTimer()
-    stopRecognition()
-    cleanupMedia()
-    setInterimTranscript('')
+  const pauseConversation = useCallback(() => {
+    if (!activeRef.current) return
+    pausedRef.current = true
+    setConversationPaused(true)
+    interruptActiveWork()
+    setPhase('idle')
+  }, [interruptActiveWork])
+
+  const resumeConversation = useCallback(() => {
+    if (!activeRef.current || !pausedRef.current) return
+    pausedRef.current = false
+    setConversationPaused(false)
     turnTextRef.current = ''
     interimRef.current = ''
-    processingRef.current = false
+    lastInterimRef.current = ''
+    setInterimTranscript('')
+    setError(null)
+    setPhase('listening')
+    beginRecognition()
+  }, [beginRecognition])
+
+  const stopConversation = useCallback(() => {
+    interruptActiveWork()
+    activeRef.current = false
+    pausedRef.current = false
+    setConversationPaused(false)
+    setConversationActive(false)
+    cleanupMedia()
     setPhase('idle')
-  }, [clearSilenceTimer, cleanupMedia, stopRecognition])
+  }, [cleanupMedia, interruptActiveWork])
 
   const toggleConversation = useCallback(async () => {
-    if (conversationActive) stopConversation()
+    if (conversationActive || conversationPaused) stopConversation()
     else await startConversation()
-  }, [conversationActive, startConversation, stopConversation])
-
-  const sendNow = useCallback(() => {
-    const combined = `${turnTextRef.current} ${interimRef.current}`.trim()
-    if (!combined || processingRef.current) return
-    clearSilenceTimer()
-    void processTurnRef.current?.(combined)
-  }, [clearSilenceTimer])
+  }, [conversationActive, conversationPaused, startConversation, stopConversation])
 
   const clearSession = useCallback(() => {
     setTurns([])
@@ -412,14 +456,15 @@ export function useRealtimeConversation(
   useEffect(() => {
     return () => {
       activeRef.current = false
-      clearSilenceTimer()
-      stopRecognition()
+      pausedRef.current = false
+      interruptActiveWork()
       cleanupMedia()
     }
-  }, [clearSilenceTimer, cleanupMedia, stopRecognition])
+  }, [cleanupMedia, interruptActiveWork])
 
   return {
     conversationActive,
+    conversationPaused,
     phase,
     volume,
     interimTranscript,
@@ -430,7 +475,8 @@ export function useRealtimeConversation(
     startConversation,
     stopConversation,
     toggleConversation,
-    sendNow,
+    pauseConversation,
+    resumeConversation,
     clearSession,
   }
 }
