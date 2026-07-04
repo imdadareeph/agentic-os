@@ -40,6 +40,11 @@ class RetrieveRequest(BaseModel):
     semanticEnabled: bool = False
     semanticTopK: int = 3
     semanticMinScore: float = 0.65
+    # Memory Budget caps (frontend memory-settings-store):
+    #   maxRetrievedMemories -> hard cap on injected memories (primary retrieve cap)
+    #   sessionContextTokens -> total inject budget (context_builder truncates to fit)
+    maxRetrievedMemories: int = 25
+    sessionContextTokens: int = 8192
 
 
 class SemanticHit(BaseModel):
@@ -121,3 +126,26 @@ class StoreRequest(BaseModel):
     sessionId: str
     turn: Turn
     agentId: str = "jarvis"
+
+
+class HeartbeatRequest(BaseModel):
+    """Frontend pings this while a conversation is active: keeps the runtime's
+    activity clock warm (defers idle background work) and mirrors the Memory
+    Budget into the idle worker. All budget fields are optional."""
+
+    maxParallelMemoryJobs: int | None = None
+    embeddingBudgetPerDay: int | None = None
+    dailyReflectionMinutes: int | None = None
+    maxBackgroundCpuPercent: int | None = None
+    maxBackgroundGpuPercent: int | None = None
+
+
+class HeartbeatResponse(BaseModel):
+    ok: bool = True
+    idle: bool = False
+
+
+class ReflectResponse(BaseModel):
+    """Result of a manual dirty-turn reflection drain (also runs in the idle worker)."""
+
+    reflected: int = 0

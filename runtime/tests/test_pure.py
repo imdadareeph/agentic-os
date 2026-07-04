@@ -58,3 +58,27 @@ def test_context_block_renders_hits():
     assert "learnings/x.md" in block
     assert "docker on 9000" in block
     assert "0.82" in block
+
+
+def test_context_block_caps_memory_count():
+    hits = [
+        {"path": "a.md", "text": "aaa", "score": 0.9},
+        {"path": "b.md", "text": "bbb", "score": 0.8},
+        {"path": "c.md", "text": "ccc", "score": 0.7},
+    ]
+    block = context_builder.build_context_block(hits, max_memories=1)
+    # Only the highest-scoring hit survives the count cap.
+    assert "a.md" in block
+    assert "b.md" not in block and "c.md" not in block
+
+
+def test_context_block_caps_token_budget():
+    big = "x" * 4000
+    hits = [
+        {"path": "a.md", "text": big, "score": 0.9},
+        {"path": "b.md", "text": big, "score": 0.8},
+    ]
+    # ~10 tokens -> ~40 chars: only the first (highest-score) entry fits.
+    block = context_builder.build_context_block(hits, max_tokens=10)
+    assert "a.md" in block
+    assert "b.md" not in block

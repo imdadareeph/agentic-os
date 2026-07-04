@@ -67,9 +67,12 @@ async def store_turn(
     refined: bool,
     agent_id: str,
 ) -> None:
+    # dirty = 1: the turn is written immediately (never blocking voice) but flagged
+    # for the idle background worker to reflect on later (MEMORY_DECISION.md).
     await conn.execute(
-        """INSERT OR REPLACE INTO turns (id, session_id, role, content, agent_id, refined, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT OR REPLACE INTO turns
+             (id, session_id, role, content, agent_id, refined, dirty, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
         (turn_id, session_id, role, content, agent_id, refined, _now()),
     )
     await conn.commit()
@@ -96,3 +99,28 @@ async def recent_turns(
         }
         for r in reversed(rows)
     ]
+
+
+async def dirty_turns(conn: aiosqlite.Connection, limit: int) -> list[dict]:
+    """Turns awaiting idle-time reflection (dirty = 1), oldest first."""
+    cur = await conn.execute(
+        """SELECT id, session_id, role, content
+           FROM turns WHERE dirty = 1
+           ORDER BY created_at ASC LIMIT ?""",
+        (limit,),
+    )
+    rows = await cur.fetchall()
+    return [
+        {"id": r["id"], "session_id": r["session_id"], "role": r["role"], "content": r["content"]}
+        for r in rows
+    ]
+
+
+async def clear_turn_dirty(conn: aiosqlite.Connection, turn_ids: list[str]) -> None:
+    if not turn_ids:
+        return
+    placeholders = ",".join("?" for _ in turn_ids)
+    await conn.execute(
+        f"UPDATE turns SET dirty = 0 WHERE id IN ({placeholders})", turn_ids
+    )
+    await conn.commit()

@@ -16,8 +16,11 @@ from memory import (
     conversation,
     embedder,
     episodic,
+    idle,
+    jobs,
     orchestrator,
     procedural,
+    reflection,
     retention,
     semantic,
     sync,
@@ -29,8 +32,11 @@ from models.memory import (
     EpisodicWriteRequest,
     EpisodicWriteResponse,
     HealthResponse,
+    HeartbeatRequest,
+    HeartbeatResponse,
     MaintenanceRequest,
     MaintenanceResponse,
+    ReflectResponse,
     RetrieveRequest,
     RetrieveResponse,
     SearchRequest,
@@ -42,6 +48,22 @@ from models.memory import (
     ToolRunResponse,
     Turn,
 )
+from models.tools import (
+    ToolCatalogEntry,
+    ToolCatalogResponse,
+    ToolExecuteRequest,
+    ToolExecuteResponse,
+    ToolLoopRequest,
+    ToolLoopResponse,
+    ToolPlanRequest,
+    ToolPlanResponse,
+    ToolsHealthResponse,
+)
+from tools import executor as tool_executor
+from tools import registry as tool_registry
+from tools import router as tool_router
+from tools.loop import run_loop
+from tools.schemas import ToolContext
 
 # Daily retention sweep interval.
 _RETENTION_INTERVAL_S = 24 * 60 * 60
@@ -51,6 +73,8 @@ _RETENTION_INTERVAL_S = 24 * 60 * 60
 async def lifespan(app: FastAPI):
     app.state.db = await conversation.connect()
     await sync.ensure_migrations(app.state.db)
+    # Let the watcher flag vault edits dirty in the DB (deferred idle embedding).
+    sync.set_db(app.state.db)
     # Bring the vault into Chroma on boot, then watch for edits.
     loop = asyncio.get_running_loop()
     asyncio.create_task(embedder.warmup())
@@ -58,9 +82,13 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(sync.reconcile())
         sync.start_watcher(loop)
     retention_task = asyncio.create_task(_retention_loop(app))
+    # Idle background worker: processes dirty turns/files only while the user is idle.
+    jobs_task = asyncio.create_task(jobs.run_loop(app.state.db))
     yield
+    jobs_task.cancel()
     retention_task.cancel()
     sync.stop_watcher()
+    sync.set_db(None)
     await app.state.db.close()
 
 
@@ -122,23 +150,31 @@ async def delete_session(session_id: str) -> Response:
 
 @app.post("/api/memory/retrieve", response_model=RetrieveResponse)
 async def retrieve(body: RetrieveRequest) -> RetrieveResponse:
+    idle.touch()  # live conversation → defer idle background work
     turns = await conversation.recent_turns(app.state.db, body.sessionId, body.limit)
     hits: list[dict] = []
     if body.semanticEnabled and body.userMessage:
+        # maxRetrievedMemories is the primary retrieve cap; never fetch more than that.
+        top_k = min(body.semanticTopK, max(1, body.maxRetrievedMemories))
         hits = await orchestrator.semantic_hits(
-            body.userMessage, body.semanticTopK, body.semanticMinScore
+            body.userMessage, top_k, body.semanticMinScore
         )
     return RetrieveResponse(
         conversation=[Turn(**t) for t in turns],
         semantic=[SemanticHit(**h) for h in hits],
         episodic=[],
         procedural=[],
-        contextBlock=build_context_block(hits),
+        contextBlock=build_context_block(
+            hits,
+            max_memories=body.maxRetrievedMemories,
+            max_tokens=body.sessionContextTokens,
+        ),
     )
 
 
 @app.post("/api/memory/store", status_code=204)
 async def store(body: StoreRequest) -> Response:
+    idle.touch()  # live conversation → defer idle background work
     await conversation.store_turn(
         app.state.db,
         body.sessionId,
@@ -149,6 +185,39 @@ async def store(body: StoreRequest) -> Response:
         body.agentId,
     )
     return Response(status_code=204)
+
+
+@app.post("/api/memory/heartbeat", response_model=HeartbeatResponse)
+async def heartbeat(body: HeartbeatRequest) -> HeartbeatResponse:
+    """Frontend pings while a conversation is active: keeps the activity clock warm
+    (defers idle background work) and mirrors the Memory Budget into the idle worker."""
+    idle.touch()
+    jobs.set_budget(
+        max_parallel_jobs=body.maxParallelMemoryJobs,
+        embedding_budget_per_day=body.embeddingBudgetPerDay,
+        daily_reflection_minutes=body.dailyReflectionMinutes,
+        max_background_cpu_percent=body.maxBackgroundCpuPercent,
+        max_background_gpu_percent=body.maxBackgroundGpuPercent,
+    )
+    return HeartbeatResponse(ok=True, idle=idle.is_idle())
+
+
+@app.post("/api/memory/reflect", response_model=ReflectResponse)
+async def reflect() -> ReflectResponse:
+    """Manually drain + reflect all dirty turns now (also runs in the idle worker).
+
+    Bypasses idle gating so the reflection pipeline can be exercised on demand.
+    """
+    total = 0
+    while True:
+        turns = await conversation.dirty_turns(app.state.db, 50)
+        if not turns:
+            break
+        for turn in turns:
+            await reflection.reflect_on_turn(app.state.db, turn)
+        await conversation.clear_turn_dirty(app.state.db, [t["id"] for t in turns])
+        total += len(turns)
+    return ReflectResponse(reflected=total)
 
 
 @app.post("/api/memory/search", response_model=SearchResponse)
@@ -203,3 +272,53 @@ async def maintenance(body: MaintenanceRequest) -> MaintenanceResponse:
         app.state.db, body.conversationDays, body.proceduralDays
     )
     return MaintenanceResponse(**result)
+
+
+# --- Tools (Phase T0) --------------------------------------------------------
+
+
+@app.get("/api/tools/health", response_model=ToolsHealthResponse)
+async def tools_health() -> ToolsHealthResponse:
+    return ToolsHealthResponse(loaded=True, toolCount=tool_registry.tool_count())
+
+
+@app.get("/api/tools/catalog", response_model=ToolCatalogResponse)
+async def tools_catalog(toolsEnabled: bool = True) -> ToolCatalogResponse:
+    if not toolsEnabled:
+        return ToolCatalogResponse(tools=[])
+    tools = [ToolCatalogEntry(**t.to_public_dict()) for t in tool_registry.get_catalog()]
+    return ToolCatalogResponse(tools=tools)
+
+
+@app.post("/api/tools/plan", response_model=ToolPlanResponse)
+async def tools_plan(body: ToolPlanRequest) -> ToolPlanResponse:
+    idle.touch()
+    result = tool_router.plan(body.userMessage, tool_registry.get_catalog())
+    return ToolPlanResponse(**result)
+
+
+@app.post("/api/tools/execute", response_model=ToolExecuteResponse)
+async def tools_execute(body: ToolExecuteRequest) -> ToolExecuteResponse:
+    ctx = ToolContext(db=app.state.db, session_id=body.sessionId or None, agent_id=body.agentId)
+    result = await tool_executor.execute(body.toolName, body.args, ctx)
+    return ToolExecuteResponse(ok=result.ok, data=result.data, error=result.error)
+
+
+@app.post("/api/tools/loop", response_model=ToolLoopResponse)
+async def tools_loop(body: ToolLoopRequest) -> ToolLoopResponse:
+    """Primary voice integration — supervised tool loop (TOOLS.md §6.2)."""
+    idle.touch()
+    ctx = ToolContext(db=app.state.db, session_id=body.sessionId or None, agent_id=body.agentId)
+    result = await run_loop(
+        ctx=ctx,
+        user_message=body.userMessage,
+        history=[t.model_dump() for t in body.history],
+        tool_names=body.candidates,
+        system_prompt=body.systemPrompt,
+        api_key=body.apiKey,
+        model=body.model,
+        base_url=body.baseUrl,
+        max_tokens=body.maxTokens,
+        temperature=body.temperature,
+    )
+    return ToolLoopResponse(**result)

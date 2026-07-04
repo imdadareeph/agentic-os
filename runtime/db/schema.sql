@@ -27,6 +27,10 @@ CREATE TABLE IF NOT EXISTS turns (
   agent_id         TEXT DEFAULT 'jarvis',
   refined          BOOLEAN DEFAULT 0,
   memory_retrieved TEXT,
+  -- Dirty-flag deferred processing (MEMORY_DECISION.md): a written turn is dirty
+  -- until the idle background worker has reflected on it, then cleared to 0.
+  dirty            BOOLEAN NOT NULL DEFAULT 0,
   created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turns_session_created ON turns(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_turns_dirty ON turns(dirty);
