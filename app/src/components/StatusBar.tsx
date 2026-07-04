@@ -1,4 +1,4 @@
-import { Settings, Brain, Cpu } from 'lucide-react'
+import { Settings, Brain, Cpu, Database } from 'lucide-react'
 import { GITNEXUS_ENABLED } from '@/config/services'
 import { useServiceHealth } from '@/hooks/useServiceHealth'
 import { useVoiceSettings } from '@/stores/voice-settings-store'
@@ -41,12 +41,14 @@ interface StatusBarProps {
   onOpenSettings?: () => void
   onOpenJarvisSettings?: () => void
   onOpenAiSettings?: () => void
+  onOpenMemorySettings?: () => void
 }
 
 export default function StatusBar({
   onOpenSettings,
   onOpenJarvisSettings,
   onOpenAiSettings,
+  onOpenMemorySettings,
 }: StatusBarProps) {
   const [settings] = useVoiceSettings()
   const [jarvisSettings] = useJarvisSettings()
@@ -145,6 +147,18 @@ export default function StatusBar({
           >
             <Cpu size={12} />
             <span className="hidden sm:inline">AI</span>
+          </button>
+        )}
+
+        {onOpenMemorySettings && (
+          <button
+            type="button"
+            onClick={onOpenMemorySettings}
+            className="flex items-center gap-1 text-[9px] tracking-wider text-white/30 hover:text-amber-400/80 transition-colors"
+            aria-label="Memory settings"
+          >
+            <Database size={12} />
+            <span className="hidden sm:inline">Memory</span>
           </button>
         )}
       </div>

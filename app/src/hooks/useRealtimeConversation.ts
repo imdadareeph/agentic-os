@@ -9,8 +9,12 @@ import {
   isSpeechRecognitionSupported,
 } from '@/services/speech-recognition'
 import { getVoiceSettings, useVoiceSettings } from '@/stores/voice-settings-store'
-import { getJarvisSettings } from '@/stores/jarvis-settings-store'
 import { createSession, endSession, storeTurn } from '@/services/memory'
+import {
+  getMemorySettings,
+  isMemoryPersistenceEnabled,
+  resetSessionMemoryFlags,
+} from '@/stores/memory-settings-store'
 import type { VitalsResponse } from '@/types/vitals'
 
 export type ConversationPhase =
@@ -91,7 +95,7 @@ export function useRealtimeConversation(
   const persistTurn = useCallback(
     (id: string, role: 'user' | 'assistant', content: string, refined = false) => {
       const sessionId = sessionIdRef.current
-      if (!sessionId) return
+      if (!sessionId || !isMemoryPersistenceEnabled()) return
       void storeTurn(sessionId, { id, role, content, refined }).catch(() => {})
     },
     []
@@ -313,8 +317,8 @@ export function useRealtimeConversation(
     const finalText = trimmed
     setPhase('thinking')
 
-    const jarvisCfg = getJarvisSettings()
-    const memoryCount = Math.max(0, jarvisCfg.conversationMemory)
+    // Turn limit migrated from JarvisSettings.conversationMemory (M1).
+    const memoryCount = Math.max(0, getMemorySettings().conversationTurnLimit)
     const history =
       memoryCount > 0
         ? turnsRef.current.slice(-memoryCount * 2)
@@ -405,7 +409,8 @@ export function useRealtimeConversation(
       streamRef.current = stream
 
       // Backend memory session — fire-and-forget; null when runtime is down.
-      if (!sessionIdRef.current) {
+      // Skipped entirely when memory is off or incognito (memory.md §4.1 rule).
+      if (!sessionIdRef.current && isMemoryPersistenceEnabled()) {
         void createSession()
           .then(id => {
             sessionIdRef.current = id
@@ -478,7 +483,16 @@ export function useRealtimeConversation(
     interimRef.current = ''
     lastInterimRef.current = ''
     setError(null)
-    // End the backend session and mint a fresh one — fire-and-forget.
+    // Incognito: no reads, no writes — skip the endSession/createSession round trip
+    // entirely (memory.md §4.1). Otherwise end the backend session and mint a new one.
+    const wasIncognito = getMemorySettings().incognitoMode
+    const memoryWasOn = isMemoryPersistenceEnabled()
+    // NEW SESSION resets session-scoped toggles.
+    resetSessionMemoryFlags()
+    if (wasIncognito || !memoryWasOn) {
+      sessionIdRef.current = null
+      return
+    }
     const prior = sessionIdRef.current
     sessionIdRef.current = null
     void (async () => {

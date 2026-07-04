@@ -23,7 +23,6 @@ import { Input } from '@/components/ui/input'
 import { think } from '@/services/jarvis'
 import { DEFAULT_JARVIS_SYSTEM_PROMPT } from '@/config/services'
 import {
-  getDefaultJarvisSettings,
   resetJarvisSettings,
   useJarvisSettings,
   type JarvisSettings,
@@ -200,19 +199,10 @@ export default function JarvisSettingsSheet({
                 onValueChange={([v]) => set('maxTokens', v)}
               />
             </div>
-            <div>
-              <Label className="text-white/70 text-xs">
-                Conversation memory: {settings.conversationMemory} turns
-              </Label>
-              <Slider
-                className="mt-2"
-                min={0}
-                max={10}
-                step={1}
-                value={[settings.conversationMemory]}
-                onValueChange={([v]) => set('conversationMemory', v)}
-              />
-            </div>
+            <p className="text-[9px] text-white/30">
+              Conversation memory moved to <span className="text-amber-400/70">Memory Settings</span>{' '}
+              (status bar → Memory).
+            </p>
           </Section>
 
           <Section title="Context">
@@ -281,8 +271,8 @@ export default function JarvisSettingsSheet({
             Reset all JARVIS settings
           </Button>
           <p className="text-[9px] text-white/20">
-            Defaults: short answers on, memory {getDefaultJarvisSettings().conversationMemory}{' '}
-            turns, vitals context on. Model selection is in AI Settings.
+            Defaults: short answers on, vitals context on. Model selection is in AI Settings;
+            conversation memory is in Memory Settings.
           </p>
         </div>
       </SheetContent>

@@ -17,6 +17,7 @@ export interface JarvisSettings {
   ollamaModel: string
   temperature: number
   maxTokens: number
+  /** @deprecated Migrated to Memory Settings → conversationTurnLimit (M1) */
   conversationMemory: number
   personality: JarvisPersonality
   injectVitalsContext: boolean
