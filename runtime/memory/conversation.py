@@ -22,7 +22,14 @@ def _now() -> str:
 
 
 async def connect() -> aiosqlite.Connection:
-    """Open the DB, creating parent dirs and applying the schema idempotently."""
+    """Open the DB, creating parent dirs and applying schema + migrations idempotently.
+
+    Every caller gets a fully-migrated DB — not just main.py's lifespan, which used
+    to call ensure_migrations() as a separate step after connect(). Baseline schema.sql
+    only CREATE TABLE IF NOT EXISTS's (a no-op on pre-existing tables), so any column
+    added after a table's first release must live in db/migrations/ and run here too,
+    or old databases crash the moment schema.sql tries to index/use that column.
+    """
     path = db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(path)
@@ -31,6 +38,12 @@ async def connect() -> aiosqlite.Connection:
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.executescript(SCHEMA_PATH.read_text())
     await conn.commit()
+
+    # Lazy import: memory.sync imports memory.semantic, not conversation, so this
+    # is safe, but importing at module load time would be a needless coupling.
+    from memory.sync import ensure_migrations
+
+    await ensure_migrations(conn)
     return conn
 
 

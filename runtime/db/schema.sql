@@ -33,4 +33,8 @@ CREATE TABLE IF NOT EXISTS turns (
   created_at       TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_turns_session_created ON turns(session_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_turns_dirty ON turns(dirty);
+-- idx_turns_dirty is created by db/migrations/0004_dirty.sql, which runs AFTER
+-- this file and after the ALTER TABLE that backfills `dirty` on pre-M2.5 DBs.
+-- Indexing it here would crash connect() on any database created before the
+-- `dirty` column existed (CREATE TABLE IF NOT EXISTS is a no-op on old tables,
+-- so the column — and this index target — genuinely isn't there yet).
