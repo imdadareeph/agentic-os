@@ -14,9 +14,12 @@ import { Slider } from '@/components/ui/slider'
 import { Input } from '@/components/ui/input'
 import {
   getMemoryHealth,
+  getObsidianConfig,
+  saveObsidianConfig,
   searchMemory,
   syncMemory,
   type MemoryHealth,
+  type ObsidianConfigInfo,
   type SemanticHit,
   type SyncResult,
 } from '@/services/memory'
@@ -65,7 +68,7 @@ function HealthPill({ label, state }: { label: string; state: boolean | null | u
   const text =
     state === true ? 'text-white/55' : state === false ? 'text-red-400/70' : 'text-white/25'
   return (
-    <span className="flex items-center gap-1 text-[9px] tracking-wider">
+    <span className="flex items-center gap-1 text-[9px] tracking-wider" role="listitem">
       <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${color}`} />
       <span className={text}>{label}</span>
     </span>
@@ -81,6 +84,10 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
   const [debugQuery, setDebugQuery] = useState('how do I set up docker for agents')
   const [debugHits, setDebugHits] = useState<SemanticHit[] | null>(null)
   const [debugLoading, setDebugLoading] = useState(false)
+  const [obsidianCfg, setObsidianCfg] = useState<ObsidianConfigInfo | null>(null)
+  const [obsidianBaseUrl, setObsidianBaseUrl] = useState('https://127.0.0.1:27124')
+  const [obsidianKeyInput, setObsidianKeyInput] = useState('')
+  const [obsidianSaving, setObsidianSaving] = useState(false)
 
   const set = <K extends keyof MemorySettings>(key: K, value: MemorySettings[K]) => {
     update({ [key]: value })
@@ -102,6 +109,20 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
     return () => {
       cancelled = true
       clearInterval(interval)
+    }
+  }, [open])
+
+  // Fetch Obsidian config (base URL + whether a key is set) once when the sheet opens.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void getObsidianConfig().then(cfg => {
+      if (cancelled || !cfg) return
+      setObsidianCfg(cfg)
+      setObsidianBaseUrl(cfg.baseUrl)
+    })
+    return () => {
+      cancelled = true
     }
   }, [open])
 
@@ -132,10 +153,13 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
                 onCheckedChange={v => set('memoryEnabled', v)}
               />
             </div>
-            <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-wrap" role="list" aria-label="Memory layer status">
               <HealthPill label="SQLite" state={health?.sqlite ?? null} />
+              <span aria-hidden="true" className="text-white/15">·</span>
               <HealthPill label="Chroma" state={health?.chroma} />
+              <span aria-hidden="true" className="text-white/15">·</span>
               <HealthPill label="Vault" state={health?.vault} />
+              <span aria-hidden="true" className="text-white/15">·</span>
               <HealthPill label="Sync" state={health?.sync} />
             </div>
             {runtimeDown && (
@@ -205,6 +229,121 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
             </div>
           </Section>
 
+          <Section title="Memory Budget">
+            <p className="text-[9px] text-white/30">
+              Resource ceilings for retrieval and idle background work. Idle jobs process
+              dirty items only while you&apos;re inactive — never during a conversation.
+            </p>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Session context: {settings.sessionContextTokens.toLocaleString()} tokens
+              </Label>
+              <Slider
+                className="mt-2"
+                min={1024}
+                max={32768}
+                step={1024}
+                value={[settings.sessionContextTokens]}
+                onValueChange={([v]) => set('sessionContextTokens', v)}
+              />
+              <p className="text-[9px] text-white/30 mt-1">Total inject budget per turn.</p>
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Max retrieved memories: {settings.maxRetrievedMemories}
+              </Label>
+              <Slider
+                className="mt-2"
+                min={1}
+                max={100}
+                step={1}
+                value={[settings.maxRetrievedMemories]}
+                onValueChange={([v]) => set('maxRetrievedMemories', v)}
+              />
+              <p className="text-[9px] text-white/30 mt-1">
+                Primary retrieve cap — bounds Semantic top-k below.
+              </p>
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Working memory: {settings.workingMemoryMb} MB
+              </Label>
+              <Slider
+                className="mt-2"
+                min={128}
+                max={2048}
+                step={128}
+                value={[settings.workingMemoryMb]}
+                onValueChange={([v]) => set('workingMemoryMb', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Parallel idle jobs: {settings.maxParallelMemoryJobs}
+              </Label>
+              <Slider
+                className="mt-2"
+                min={1}
+                max={8}
+                step={1}
+                value={[settings.maxParallelMemoryJobs]}
+                onValueChange={([v]) => set('maxParallelMemoryJobs', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Background CPU cap: {settings.maxBackgroundCpuPercent}%
+              </Label>
+              <Slider
+                className="mt-2"
+                min={5}
+                max={100}
+                step={5}
+                value={[settings.maxBackgroundCpuPercent]}
+                onValueChange={([v]) => set('maxBackgroundCpuPercent', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Background GPU cap: {settings.maxBackgroundGpuPercent}%
+              </Label>
+              <Slider
+                className="mt-2"
+                min={5}
+                max={100}
+                step={5}
+                value={[settings.maxBackgroundGpuPercent]}
+                onValueChange={([v]) => set('maxBackgroundGpuPercent', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Daily reflection: {settings.dailyReflectionMinutes} min
+              </Label>
+              <Slider
+                className="mt-2"
+                min={0}
+                max={120}
+                step={5}
+                value={[settings.dailyReflectionMinutes]}
+                onValueChange={([v]) => set('dailyReflectionMinutes', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Embedding budget: {settings.embeddingBudgetPerDay.toLocaleString()} / day
+              </Label>
+              <Slider
+                className="mt-2"
+                min={50}
+                max={5000}
+                step={50}
+                value={[settings.embeddingBudgetPerDay]}
+                onValueChange={([v]) => set('embeddingBudgetPerDay', v)}
+              />
+            </div>
+          </Section>
+
           <Section title="Semantic">
             <div className="flex items-center justify-between gap-3">
               <Label className="text-white/70">Enable layer</Label>
@@ -214,7 +353,15 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
               />
             </div>
             <div>
-              <Label className="text-white/70 text-xs">Top-k: {settings.semanticTopK}</Label>
+              <Label className="text-white/70 text-xs">
+                Top-k: {settings.semanticTopK}
+                {settings.semanticTopK > settings.maxRetrievedMemories && (
+                  <span className="text-amber-400/70">
+                    {' '}
+                    · capped to {settings.maxRetrievedMemories}
+                  </span>
+                )}
+              </Label>
               <Slider
                 className="mt-2"
                 min={1}
@@ -338,6 +485,59 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
               <span className="font-mono">{settings.episodicNamespace}jarvis/</span> and embedded.
               Never overwrites your notes.
             </p>
+
+            <div className="pt-2 border-t border-white/5 space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label className="text-white/70 text-xs">Obsidian Local REST API</Label>
+                <HealthPill
+                  label={
+                    health?.obsidianApi === null
+                      ? 'not configured'
+                      : health?.obsidianApi
+                        ? 'connected'
+                        : 'offline'
+                  }
+                  state={health?.obsidianApi ?? null}
+                />
+              </div>
+              <p className="text-[9px] text-white/30">
+                Health signal only — episodic writes stay direct-to-disk so they work even
+                when Obsidian is closed. Get the key from Obsidian → Settings → Local REST API.
+              </p>
+              <Input
+                className="bg-white/5 border-white/10 text-white/70 text-xs font-mono"
+                value={obsidianBaseUrl}
+                onChange={e => setObsidianBaseUrl(e.target.value)}
+                placeholder="https://127.0.0.1:27124"
+              />
+              <Input
+                type="password"
+                className="bg-white/5 border-white/10 text-white/70 text-xs font-mono"
+                value={obsidianKeyInput}
+                onChange={e => setObsidianKeyInput(e.target.value)}
+                placeholder={obsidianCfg?.configured ? 'Key set — enter a new one to replace' : 'Paste API key'}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-white/10 text-white/70"
+                disabled={obsidianSaving || (!obsidianKeyInput.trim() && !obsidianCfg?.configured)}
+                onClick={() => {
+                  setObsidianSaving(true)
+                  void saveObsidianConfig(obsidianBaseUrl, obsidianKeyInput.trim())
+                    .then(cfg => {
+                      if (cfg) {
+                        setObsidianCfg(cfg)
+                        setObsidianKeyInput('')
+                      }
+                    })
+                    .finally(() => setObsidianSaving(false))
+                }}
+              >
+                {obsidianSaving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
           </Section>
 
           <Section title="Procedural" phase="M4">

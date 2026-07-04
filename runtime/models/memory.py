@@ -12,6 +12,18 @@ class HealthResponse(BaseModel):
     chroma: bool | None = None
     vault: bool | None = None
     sync: bool | None = None
+    # None = Obsidian API key not configured yet; True/False = reachable or not.
+    obsidianApi: bool | None = None
+
+
+class ObsidianConfigRequest(BaseModel):
+    baseUrl: str = "https://127.0.0.1:27124"
+    apiKey: str = ""
+
+
+class ObsidianConfigResponse(BaseModel):
+    baseUrl: str
+    configured: bool  # never echoes the raw key back
 
 
 class CreateSessionRequest(BaseModel):

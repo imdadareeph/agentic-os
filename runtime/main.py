@@ -20,6 +20,8 @@ from memory import (
     episodic,
     idle,
     jobs,
+    obsidian_client,
+    obsidian_config,
     orchestrator,
     procedural,
     reflection,
@@ -38,6 +40,8 @@ from models.memory import (
     HeartbeatResponse,
     MaintenanceRequest,
     MaintenanceResponse,
+    ObsidianConfigRequest,
+    ObsidianConfigResponse,
     ReflectResponse,
     RetrieveRequest,
     RetrieveResponse,
@@ -134,7 +138,22 @@ async def health() -> HealthResponse:
         chroma=semantic.available(),
         vault=sync.vault_ready(),
         sync=sync.sync_healthy(),
+        obsidianApi=await obsidian_client.check_health(),
     )
+
+
+@app.get("/api/memory/obsidian/config", response_model=ObsidianConfigResponse)
+async def get_obsidian_config() -> ObsidianConfigResponse:
+    """Never echoes the raw key back — only whether one is set."""
+    cfg = obsidian_config.load()
+    return ObsidianConfigResponse(baseUrl=cfg["baseUrl"], configured=bool(cfg["apiKey"]))
+
+
+@app.post("/api/memory/obsidian/config", response_model=ObsidianConfigResponse)
+async def save_obsidian_config(body: ObsidianConfigRequest) -> ObsidianConfigResponse:
+    obsidian_config.save(body.baseUrl, body.apiKey)
+    cfg = obsidian_config.load()
+    return ObsidianConfigResponse(baseUrl=cfg["baseUrl"], configured=bool(cfg["apiKey"]))
 
 
 @app.post("/api/sessions", response_model=CreateSessionResponse)

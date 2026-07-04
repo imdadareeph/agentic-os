@@ -22,6 +22,13 @@ export interface MemoryHealth {
   chroma: boolean | null
   vault: boolean | null
   sync: boolean | null
+  /** null = Obsidian API key not configured yet; true/false = reachable or not. */
+  obsidianApi: boolean | null
+}
+
+export interface ObsidianConfigInfo {
+  baseUrl: string
+  configured: boolean
 }
 
 export interface SemanticHit {
@@ -42,6 +49,10 @@ export interface RetrieveOptions {
   semanticEnabled?: boolean
   semanticTopK?: number
   semanticMinScore?: number
+  /** Memory Budget: hard cap on injected memories (primary retrieve cap). */
+  maxRetrievedMemories?: number
+  /** Memory Budget: total inject token budget for the prompt. */
+  sessionContextTokens?: number
 }
 
 const EMPTY_RETRIEVE: RetrieveResult = {
@@ -69,6 +80,31 @@ export async function getMemoryHealth(): Promise<MemoryHealth | null> {
     const res = await fetch(`${RUNTIME_BASE}/api/memory/health`)
     if (!res.ok) return null
     return (await res.json()) as MemoryHealth
+  } catch {
+    return null
+  }
+}
+
+/** Current Obsidian API config. Never returns the raw key — only whether one is set. */
+export async function getObsidianConfig(): Promise<ObsidianConfigInfo | null> {
+  try {
+    const res = await fetch(`${RUNTIME_BASE}/api/memory/obsidian/config`)
+    if (!res.ok) return null
+    return (await res.json()) as ObsidianConfigInfo
+  } catch {
+    return null
+  }
+}
+
+/** Save Obsidian base URL + API key. The key is stored server-side (~/jarvis/obsidian.json), never in the browser. */
+export async function saveObsidianConfig(
+  baseUrl: string,
+  apiKey: string
+): Promise<ObsidianConfigInfo | null> {
+  const res = await post('/api/memory/obsidian/config', { baseUrl, apiKey })
+  if (!res || !res.ok) return null
+  try {
+    return (await res.json()) as ObsidianConfigInfo
   } catch {
     return null
   }
@@ -122,6 +158,8 @@ export async function retrieveMemory(
     semanticEnabled: options.semanticEnabled ?? false,
     semanticTopK: options.semanticTopK ?? 3,
     semanticMinScore: options.semanticMinScore ?? 0.65,
+    maxRetrievedMemories: options.maxRetrievedMemories ?? 25,
+    sessionContextTokens: options.sessionContextTokens ?? 8192,
   })
   if (!res || !res.ok) return EMPTY_RETRIEVE
   try {
@@ -189,6 +227,23 @@ export async function writeEpisodic(note: EpisodicWrite): Promise<void> {
     tags: note.tags ?? [],
     sources: note.sources ?? [],
   })
+}
+
+export interface MemoryBudget {
+  maxParallelMemoryJobs?: number
+  embeddingBudgetPerDay?: number
+  dailyReflectionMinutes?: number
+  maxBackgroundCpuPercent?: number
+  maxBackgroundGpuPercent?: number
+}
+
+/**
+ * Heartbeat while a conversation is active: keeps the runtime's activity clock
+ * warm (so idle background memory work stands down) and mirrors the Memory
+ * Budget into the idle worker. Fire-and-forget safe.
+ */
+export async function sendHeartbeat(budget: MemoryBudget = {}): Promise<void> {
+  await post('/api/memory/heartbeat', budget)
 }
 
 /** Client-side heuristic mirroring the runtime intent gate — is this worth persisting? */
