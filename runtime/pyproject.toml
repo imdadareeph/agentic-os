@@ -5,7 +5,10 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "aiosqlite>=0.22.1",
+    "chromadb>=1.5.9",
     "fastapi>=0.139.0",
+    "httpx>=0.28.1",
     "pydantic>=2.13.4",
     "uvicorn[standard]>=0.50.0",
+    "watchdog>=6.0.0",
 ]

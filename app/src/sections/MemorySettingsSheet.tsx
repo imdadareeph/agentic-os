@@ -12,7 +12,14 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Input } from '@/components/ui/input'
-import { getMemoryHealth, type MemoryHealth } from '@/services/memory'
+import {
+  getMemoryHealth,
+  searchMemory,
+  syncMemory,
+  type MemoryHealth,
+  type SemanticHit,
+  type SyncResult,
+} from '@/services/memory'
 import {
   getDefaultMemorySettings,
   resetMemorySettings,
@@ -69,6 +76,11 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
   const [settings, update] = useMemorySettings()
   const [health, setHealth] = useState<MemoryHealth | null>(null)
   const [healthChecked, setHealthChecked] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null)
+  const [debugQuery, setDebugQuery] = useState('how do I set up docker for agents')
+  const [debugHits, setDebugHits] = useState<SemanticHit[] | null>(null)
+  const [debugLoading, setDebugLoading] = useState(false)
 
   const set = <K extends keyof MemorySettings>(key: K, value: MemorySettings[K]) => {
     update({ [key]: value })
@@ -193,15 +205,112 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
             </div>
           </Section>
 
-          <Section title="Semantic" phase="M2">
+          <Section title="Semantic">
             <div className="flex items-center justify-between gap-3">
               <Label className="text-white/70">Enable layer</Label>
-              <Switch checked={settings.semanticMemoryEnabled} disabled />
+              <Switch
+                checked={settings.semanticMemoryEnabled}
+                onCheckedChange={v => set('semanticMemoryEnabled', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">Top-k: {settings.semanticTopK}</Label>
+              <Slider
+                className="mt-2"
+                min={1}
+                max={10}
+                step={1}
+                value={[settings.semanticTopK]}
+                onValueChange={([v]) => set('semanticTopK', v)}
+              />
+            </div>
+            <div>
+              <Label className="text-white/70 text-xs">
+                Min score: {settings.semanticMinScore.toFixed(2)}
+              </Label>
+              <Slider
+                className="mt-2"
+                min={0}
+                max={1}
+                step={0.05}
+                value={[settings.semanticMinScore]}
+                onValueChange={([v]) => set('semanticMinScore', v)}
+              />
             </div>
             <p className="text-[9px] text-white/30">
-              Chroma top-k {settings.semanticTopK} · min score {settings.semanticMinScore} ·{' '}
-              {settings.embeddingModel}
+              Chroma · {settings.embeddingModel} · 300ms retrieval budget.
             </p>
+          </Section>
+
+          <Section title="Sync">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70">Auto-sync vault → Chroma</Label>
+              <Switch
+                checked={settings.autoSyncEnabled}
+                onCheckedChange={v => set('autoSyncEnabled', v)}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-white/10 text-white/70"
+              disabled={syncing}
+              onClick={() => {
+                setSyncing(true)
+                setSyncResult(null)
+                void syncMemory()
+                  .then(r => setSyncResult(r))
+                  .finally(() => setSyncing(false))
+              }}
+            >
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </Button>
+            {syncResult && (
+              <p className="text-[9px] text-white/40">
+                Embedded {syncResult.embedded} · deleted {syncResult.deleted}
+                {syncResult.errors.length > 0 && (
+                  <span className="text-red-400/70"> · {syncResult.errors.length} errors</span>
+                )}
+              </p>
+            )}
+          </Section>
+
+          <Section title="Debug">
+            <Input
+              className="bg-white/5 border-white/10 text-white/80 text-xs"
+              value={debugQuery}
+              onChange={e => setDebugQuery(e.target.value)}
+              placeholder="Test semantic query…"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="border-white/10 text-white/70"
+              disabled={debugLoading || !debugQuery.trim()}
+              onClick={() => {
+                setDebugLoading(true)
+                setDebugHits(null)
+                void searchMemory(debugQuery.trim(), settings.semanticTopK, settings.semanticMinScore)
+                  .then(hits => setDebugHits(hits))
+                  .finally(() => setDebugLoading(false))
+              }}
+            >
+              {debugLoading ? 'Searching…' : 'Test query'}
+            </Button>
+            {debugHits && debugHits.length === 0 && (
+              <p className="text-[9px] text-white/30">No hits above min score.</p>
+            )}
+            {debugHits?.map((h, i) => (
+              <div key={i} className="text-[9px] border border-white/10 p-2 space-y-1">
+                <div className="flex justify-between text-white/40">
+                  <span className="font-mono truncate">{h.path}</span>
+                  <span className="text-amber-400/70">{h.score.toFixed(2)}</span>
+                </div>
+                <p className="text-white/50 leading-relaxed line-clamp-3">{h.text}</p>
+              </div>
+            ))}
           </Section>
 
           <Section title="Episodic (Obsidian)" phase="M3">
@@ -220,13 +329,6 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
             <div className="flex items-center justify-between gap-3">
               <Label className="text-white/70">Enable layer</Label>
               <Switch checked={settings.proceduralMemoryEnabled} disabled />
-            </div>
-          </Section>
-
-          <Section title="Sync" phase="M2">
-            <div className="flex items-center justify-between gap-3">
-              <Label className="text-white/70">Auto-sync vault → Chroma</Label>
-              <Switch checked={settings.autoSyncEnabled} disabled />
             </div>
           </Section>
 

@@ -1,24 +1,30 @@
-"""Agentic OS memory runtime — FastAPI app (Phase M0).
+"""Agentic OS memory runtime — FastAPI app (Phase M0 + M2).
 
 Run: cd runtime && uv run uvicorn main:app --reload --port 8000
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from memory import conversation
+from memory import conversation, embedder, orchestrator, semantic, sync
+from memory.context_builder import build_context_block
 from models.memory import (
     CreateSessionRequest,
     CreateSessionResponse,
     HealthResponse,
     RetrieveRequest,
     RetrieveResponse,
+    SearchRequest,
+    SearchResponse,
+    SemanticHit,
     StoreRequest,
+    SyncResponse,
     Turn,
 )
 
@@ -26,14 +32,20 @@ from models.memory import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.db = await conversation.connect()
+    await sync.ensure_migrations(app.state.db)
+    # Bring the vault into Chroma on boot, then watch for edits.
+    loop = asyncio.get_running_loop()
+    asyncio.create_task(embedder.warmup())
+    if sync.vault_ready():
+        asyncio.create_task(sync.reconcile())
+        sync.start_watcher(loop)
     yield
+    sync.stop_watcher()
     await app.state.db.close()
 
 
-app = FastAPI(title="Agentic OS Memory Runtime", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Agentic OS Memory Runtime", version="0.2.0", lifespan=lifespan)
 
-# Browser reaches us via the Vite /runtime proxy (same-origin), but allow
-# direct localhost access for curl/debug tools.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,7 +61,12 @@ async def health() -> HealthResponse:
         sqlite_ok = True
     except Exception:
         sqlite_ok = False
-    return HealthResponse(sqlite=sqlite_ok, chroma=None, vault=None, sync=None)
+    return HealthResponse(
+        sqlite=sqlite_ok,
+        chroma=semantic.available(),
+        vault=sync.vault_ready(),
+        sync=sync.sync_healthy(),
+    )
 
 
 @app.post("/api/sessions", response_model=CreateSessionResponse)
@@ -76,11 +93,17 @@ async def delete_session(session_id: str) -> Response:
 @app.post("/api/memory/retrieve", response_model=RetrieveResponse)
 async def retrieve(body: RetrieveRequest) -> RetrieveResponse:
     turns = await conversation.recent_turns(app.state.db, body.sessionId, body.limit)
+    hits: list[dict] = []
+    if body.semanticEnabled and body.userMessage:
+        hits = await orchestrator.semantic_hits(
+            body.userMessage, body.semanticTopK, body.semanticMinScore
+        )
     return RetrieveResponse(
         conversation=[Turn(**t) for t in turns],
-        semantic=[],
+        semantic=[SemanticHit(**h) for h in hits],
         episodic=[],
         procedural=[],
+        contextBlock=build_context_block(hits),
     )
 
 
@@ -96,3 +119,19 @@ async def store(body: StoreRequest) -> Response:
         body.agentId,
     )
     return Response(status_code=204)
+
+
+@app.post("/api/memory/search", response_model=SearchResponse)
+async def search(body: SearchRequest) -> SearchResponse:
+    """Debug semantic search (Memory Settings → Debug). Bypasses intent gating."""
+    try:
+        hits = await semantic.query(body.query, body.topK, body.minScore)
+    except Exception:
+        hits = []
+    return SearchResponse(hits=[SemanticHit(**h) for h in hits])
+
+
+@app.post("/api/memory/sync", response_model=SyncResponse)
+async def trigger_sync() -> SyncResponse:
+    result = await sync.reconcile()
+    return SyncResponse(**result)

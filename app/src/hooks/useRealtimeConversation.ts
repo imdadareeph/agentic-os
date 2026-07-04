@@ -9,7 +9,7 @@ import {
   isSpeechRecognitionSupported,
 } from '@/services/speech-recognition'
 import { getVoiceSettings, useVoiceSettings } from '@/stores/voice-settings-store'
-import { createSession, endSession, storeTurn } from '@/services/memory'
+import { createSession, endSession, storeTurn, retrieveMemory } from '@/services/memory'
 import {
   getMemorySettings,
   isMemoryPersistenceEnabled,
@@ -351,8 +351,32 @@ export function useRealtimeConversation(
       }
     })()
 
+    // Retrieve semantic memory (M2) before the LLM call. Gated + degrades to
+    // empty on any failure — the runtime enforces its own 300ms timeout.
+    let memoryContext: string | null = null
+    const mem = getMemorySettings()
+    if (
+      sessionIdRef.current &&
+      isMemoryPersistenceEnabled() &&
+      mem.semanticMemoryEnabled
+    ) {
+      const result = await retrieveMemory(sessionIdRef.current, finalText, {
+        semanticEnabled: true,
+        semanticTopK: mem.semanticTopK,
+        semanticMinScore: mem.semanticMinScore,
+      })
+      memoryContext = result.contextBlock || null
+    }
+    if (pausedRef.current || controller.signal.aborted) return
+
     try {
-      const reply = await think(finalText, history, vitalsRef.current, controller.signal)
+      const reply = await think(
+        finalText,
+        history,
+        vitalsRef.current,
+        controller.signal,
+        memoryContext
+      )
       if (pausedRef.current || controller.signal.aborted) return
 
       const assistantId = newTurnId()

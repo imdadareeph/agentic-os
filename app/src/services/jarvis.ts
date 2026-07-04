@@ -15,10 +15,13 @@ export async function think(
   userMessage: string,
   history: ConversationTurn[] = [],
   vitals?: VitalsResponse | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  memoryContext?: string | null
 ): Promise<string> {
   const settings = getJarvisSettings()
-  const system = buildSystemPrompt(settings, vitals)
+  const base = buildSystemPrompt(settings, vitals)
+  // Retrieved-memory block (M2) appended after persona/vitals, per memory.md §8.
+  const system = memoryContext ? `${base}\n\n${memoryContext}` : base
   const messages = buildChatMessages(history, userMessage, system)
 
   try {

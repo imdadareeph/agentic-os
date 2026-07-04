@@ -37,15 +37,42 @@ class RetrieveRequest(BaseModel):
     userMessage: str = ""
     agentId: str = "jarvis"
     limit: int = 20
+    semanticEnabled: bool = False
+    semanticTopK: int = 3
+    semanticMinScore: float = 0.65
+
+
+class SemanticHit(BaseModel):
+    path: str | None = None
+    text: str
+    score: float
 
 
 class RetrieveResponse(BaseModel):
     """Envelope stays stable across phases — later layers are empty lists for now."""
 
     conversation: list[Turn]
-    semantic: list = []
+    semantic: list[SemanticHit] = []
     episodic: list = []
     procedural: list = []
+    contextBlock: str = ""
+
+
+class SearchRequest(BaseModel):
+    query: str
+    topK: int = 3
+    minScore: float = 0.65
+
+
+class SearchResponse(BaseModel):
+    hits: list[SemanticHit] = []
+
+
+class SyncResponse(BaseModel):
+    embedded: int = 0
+    deleted: int = 0
+    vault: bool = False
+    errors: list[str] = []
 
 
 class StoreRequest(BaseModel):

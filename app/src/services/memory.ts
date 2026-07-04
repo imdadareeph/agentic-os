@@ -24,11 +24,24 @@ export interface MemoryHealth {
   sync: boolean | null
 }
 
+export interface SemanticHit {
+  path: string | null
+  text: string
+  score: number
+}
+
 export interface RetrieveResult {
   conversation: MemoryTurn[]
-  semantic: unknown[]
+  semantic: SemanticHit[]
   episodic: unknown[]
   procedural: unknown[]
+  contextBlock: string
+}
+
+export interface RetrieveOptions {
+  semanticEnabled?: boolean
+  semanticTopK?: number
+  semanticMinScore?: number
 }
 
 const EMPTY_RETRIEVE: RetrieveResult = {
@@ -36,6 +49,7 @@ const EMPTY_RETRIEVE: RetrieveResult = {
   semantic: [],
   episodic: [],
   procedural: [],
+  contextBlock: '',
 }
 
 async function post(path: string, body: unknown): Promise<Response | null> {
@@ -98,13 +112,58 @@ export async function storeTurn(
 export async function retrieveMemory(
   sessionId: string,
   userMessage: string,
+  options: RetrieveOptions = {},
   agentId = 'jarvis'
 ): Promise<RetrieveResult> {
-  const res = await post('/api/memory/retrieve', { sessionId, userMessage, agentId })
+  const res = await post('/api/memory/retrieve', {
+    sessionId,
+    userMessage,
+    agentId,
+    semanticEnabled: options.semanticEnabled ?? false,
+    semanticTopK: options.semanticTopK ?? 3,
+    semanticMinScore: options.semanticMinScore ?? 0.65,
+  })
   if (!res || !res.ok) return EMPTY_RETRIEVE
   try {
     return (await res.json()) as RetrieveResult
   } catch {
     return EMPTY_RETRIEVE
+  }
+}
+
+export interface SearchResult {
+  hits: SemanticHit[]
+}
+
+/** Debug semantic search (Memory Settings → Debug). Empty on failure. */
+export async function searchMemory(
+  query: string,
+  topK = 3,
+  minScore = 0.65
+): Promise<SemanticHit[]> {
+  const res = await post('/api/memory/search', { query, topK, minScore })
+  if (!res || !res.ok) return []
+  try {
+    return ((await res.json()) as SearchResult).hits ?? []
+  } catch {
+    return []
+  }
+}
+
+export interface SyncResult {
+  embedded: number
+  deleted: number
+  vault: boolean
+  errors: string[]
+}
+
+/** Trigger a vault → Chroma reconcile. Null on failure. */
+export async function syncMemory(): Promise<SyncResult | null> {
+  const res = await post('/api/memory/sync', {})
+  if (!res || !res.ok) return null
+  try {
+    return (await res.json()) as SyncResult
+  } catch {
+    return null
   }
 }
