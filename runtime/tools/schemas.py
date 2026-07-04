@@ -21,6 +21,8 @@ class ToolContext:
     db: aiosqlite.Connection
     session_id: str | None = None
     agent_id: str = "jarvis"
+    # T1 filesystem allowlist; None -> handler defaults (repo root + ~/jarvis).
+    allowed_paths: list[str] | None = None
 
 
 ToolHandler = Callable[[dict[str, Any], ToolContext], Awaitable[dict[str, Any]]]

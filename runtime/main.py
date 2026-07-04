@@ -279,27 +279,35 @@ async def maintenance(body: MaintenanceRequest) -> MaintenanceResponse:
 
 @app.get("/api/tools/health", response_model=ToolsHealthResponse)
 async def tools_health() -> ToolsHealthResponse:
-    return ToolsHealthResponse(loaded=True, toolCount=tool_registry.tool_count())
+    return ToolsHealthResponse(
+        loaded=True,
+        toolCount=tool_registry.tool_count(),
+        categories=tool_registry.category_counts(),
+    )
 
 
 @app.get("/api/tools/catalog", response_model=ToolCatalogResponse)
-async def tools_catalog(toolsEnabled: bool = True) -> ToolCatalogResponse:
+async def tools_catalog(toolsEnabled: bool = True, categories: str | None = None) -> ToolCatalogResponse:
     if not toolsEnabled:
         return ToolCatalogResponse(tools=[])
-    tools = [ToolCatalogEntry(**t.to_public_dict()) for t in tool_registry.get_catalog()]
+    cats = [c for c in categories.split(",") if c] if categories else None
+    tools = [ToolCatalogEntry(**t.to_public_dict()) for t in tool_registry.get_catalog(categories=cats)]
     return ToolCatalogResponse(tools=tools)
 
 
 @app.post("/api/tools/plan", response_model=ToolPlanResponse)
 async def tools_plan(body: ToolPlanRequest) -> ToolPlanResponse:
     idle.touch()
-    result = tool_router.plan(body.userMessage, tool_registry.get_catalog())
+    result = tool_router.plan(body.userMessage, tool_registry.get_catalog(categories=body.categories))
     return ToolPlanResponse(**result)
 
 
 @app.post("/api/tools/execute", response_model=ToolExecuteResponse)
 async def tools_execute(body: ToolExecuteRequest) -> ToolExecuteResponse:
-    ctx = ToolContext(db=app.state.db, session_id=body.sessionId or None, agent_id=body.agentId)
+    ctx = ToolContext(
+        db=app.state.db, session_id=body.sessionId or None,
+        agent_id=body.agentId, allowed_paths=body.allowedPaths,
+    )
     result = await tool_executor.execute(body.toolName, body.args, ctx)
     return ToolExecuteResponse(ok=result.ok, data=result.data, error=result.error)
 
@@ -308,7 +316,10 @@ async def tools_execute(body: ToolExecuteRequest) -> ToolExecuteResponse:
 async def tools_loop(body: ToolLoopRequest) -> ToolLoopResponse:
     """Primary voice integration — supervised tool loop (TOOLS.md §6.2)."""
     idle.touch()
-    ctx = ToolContext(db=app.state.db, session_id=body.sessionId or None, agent_id=body.agentId)
+    ctx = ToolContext(
+        db=app.state.db, session_id=body.sessionId or None,
+        agent_id=body.agentId, allowed_paths=body.allowedPaths,
+    )
     result = await run_loop(
         ctx=ctx,
         user_message=body.userMessage,

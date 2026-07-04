@@ -10,6 +10,7 @@ from pydantic import BaseModel
 class ToolsHealthResponse(BaseModel):
     loaded: bool
     toolCount: int
+    categories: dict[str, int] = {}
 
 
 class ToolCatalogEntry(BaseModel):
@@ -31,6 +32,7 @@ class ToolPlanRequest(BaseModel):
     sessionId: str = ""
     userMessage: str
     agentId: str = "jarvis"
+    categories: list[str] | None = None
 
 
 class ToolPlanResponse(BaseModel):
@@ -44,6 +46,7 @@ class ToolExecuteRequest(BaseModel):
     toolName: str
     args: dict[str, Any] = {}
     agentId: str = "jarvis"
+    allowedPaths: list[str] | None = None
 
 
 class ToolExecuteResponse(BaseModel):
@@ -64,6 +67,8 @@ class ToolLoopRequest(BaseModel):
     candidates: list[str] = []
     systemPrompt: str = ""
     agentId: str = "jarvis"
+    categories: list[str] | None = None
+    allowedPaths: list[str] | None = None
     # Passed through from the browser's AI Settings — never persisted server-side,
     # never written into tool_runs (TOOLS.md §7: no secrets in tool schemas/logs).
     apiKey: str | None = None

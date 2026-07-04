@@ -22,14 +22,15 @@ async def db(tmp_path, monkeypatch):
 def test_registry_loads_t0_catalog():
     catalog = registry.get_catalog()
     names = {t.name for t in catalog}
-    assert names == {
+    # T0 core tools are always present (T1+ adds more on top).
+    assert {
         "vitals.fetch",
         "memory.search",
         "memory.retrieve",
         "system.status",
         "time.now",
-    }
-    assert registry.tool_count() == 5
+    } <= names
+    assert registry.tool_count() >= 5
     assert all(t.permission == "allow" and t.latency_class == "fast" for t in catalog)
 
 

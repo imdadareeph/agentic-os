@@ -8,6 +8,13 @@ import { chatWithActiveProvider } from '@/services/llm/router'
 import { llmGenerate } from '@/services/voicebox'
 import { getJarvisSettings } from '@/stores/jarvis-settings-store'
 import { getVoiceSettings } from '@/stores/voice-settings-store'
+import { getAiSettings } from '@/stores/ai-settings-store'
+import {
+  areToolsActive,
+  enabledCategories,
+  getToolSettings,
+} from '@/stores/tool-settings-store'
+import { planTools, runToolLoop } from '@/services/tools'
 import type { VitalsResponse } from '@/types/vitals'
 import { speakText } from '@/services/voice'
 
@@ -45,6 +52,69 @@ export async function think(
         : `No LLM available — ${message}`
     )
   }
+}
+
+/**
+ * Tool-aware think (T0/T1). If tools are enabled and the message warrants a
+ * tool, run the supervised tool loop; otherwise fall through to `think()`.
+ * Any failure or degradation falls back to plain `think()` — the voice path
+ * must never break because of tools.
+ *
+ * The tool loop is Anthropic-native (best tool support); other providers
+ * degrade to text, so we only attempt the loop when Anthropic is active with
+ * a key. Everything else is a normal think().
+ */
+export async function thinkWithTools(
+  userMessage: string,
+  history: ConversationTurn[] = [],
+  vitals?: VitalsResponse | null,
+  signal?: AbortSignal,
+  memoryContext?: string | null,
+  sessionId = ''
+): Promise<string> {
+  if (!areToolsActive()) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
+
+  const ai = getAiSettings()
+  const providerId = ai.activeProvider
+  const cfg = ai.providers[providerId]
+  // Only Anthropic runs the native tool loop for now; else normal chat.
+  if (providerId !== 'anthropic' || !cfg.apiKey) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
+
+  const categories = enabledCategories()
+  const plan = await planTools(userMessage, categories, sessionId)
+  if (!plan.useTools) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
+
+  const settings = getJarvisSettings()
+  const baseSystem = buildSystemPrompt(settings, vitals)
+  const base = memoryContext ? `${baseSystem}\n\n${memoryContext}` : baseSystem
+  const toolCfg = getToolSettings()
+
+  const result = await runToolLoop({
+    userMessage,
+    history: history.map(t => ({ role: t.role, content: t.text })),
+    candidates: plan.candidates,
+    systemPrompt: base,
+    sessionId,
+    categories,
+    allowedPaths: toolCfg.allowedPaths.length ? toolCfg.allowedPaths : undefined,
+    apiKey: cfg.apiKey,
+    model: cfg.model || undefined,
+    baseUrl: cfg.baseUrl,
+    maxTokens: effectiveMaxTokens(settings),
+    temperature: settings.temperature,
+  })
+
+  // Degraded / no reply / runtime down → fall back to the normal path.
+  if (!result || result.degraded || !result.reply) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
+  return result.reply
 }
 
 export async function respondWithVoice(

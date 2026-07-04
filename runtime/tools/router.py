@@ -8,7 +8,7 @@ from tools.schemas import ToolDefinition
 
 # execute_tool triggers — TOOLS.md §11 scope note.
 _EXECUTE_WORDS = re.compile(
-    r"\b(run|execute|pull|fetch|check|metrics|status|search|look ?up)\b",
+    r"\b(run|execute|pull|fetch|check|metrics|status|search|look ?up|read|list|show|open|files?|folder|directory|git|docker|commits?|containers?)\b",
     re.IGNORECASE,
 )
 # Never enter the tool loop for these.
@@ -26,6 +26,11 @@ _TOOL_KEYWORDS: dict[str, list[str]] = {
     "memory.retrieve": ["retrieve", "conversation history", "earlier", "context"],
     "system.status": ["system status", "runtime status", "health", "is everything running"],
     "time.now": ["time", "what time", "date", "timezone"],
+    "filesystem.read": ["read file", "open file", "show me the file", "contents of", "cat "],
+    "filesystem.list": ["list", "what's in", "whats in", "folder", "directory", "files in"],
+    "git.status": ["git status", "working tree", "uncommitted", "what changed"],
+    "git.log": ["git log", "recent commits", "commit history", "last commits"],
+    "docker.ps": ["docker", "containers", "running containers", "docker ps"],
 }
 
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
 import { isAbortError } from '@/lib/fetch'
-import { think } from '@/services/jarvis'
+import { thinkWithTools } from '@/services/jarvis'
 import { cancelSpeech, speakText, transcribeAudio } from '@/services/voice'
 import { peekWhisperStatus } from '@/services/whisper'
 import {
@@ -16,6 +16,7 @@ import {
   retrieveMemory,
   writeEpisodic,
   looksResearchy,
+  sendHeartbeat,
 } from '@/services/memory'
 import {
   getMemorySettings,
@@ -362,6 +363,17 @@ export function useRealtimeConversation(
     // empty on any failure — the runtime enforces its own 300ms timeout.
     let memoryContext: string | null = null
     const mem = getMemorySettings()
+    if (sessionIdRef.current && isMemoryPersistenceEnabled()) {
+      // Heartbeat: keep the runtime active-clock warm + push the Memory Budget so
+      // the idle background worker stands down while we're mid-conversation.
+      void sendHeartbeat({
+        maxParallelMemoryJobs: mem.maxParallelMemoryJobs,
+        embeddingBudgetPerDay: mem.embeddingBudgetPerDay,
+        dailyReflectionMinutes: mem.dailyReflectionMinutes,
+        maxBackgroundCpuPercent: mem.maxBackgroundCpuPercent,
+        maxBackgroundGpuPercent: mem.maxBackgroundGpuPercent,
+      }).catch(() => {})
+    }
     if (
       sessionIdRef.current &&
       isMemoryPersistenceEnabled() &&
@@ -371,18 +383,23 @@ export function useRealtimeConversation(
         semanticEnabled: true,
         semanticTopK: mem.semanticTopK,
         semanticMinScore: mem.semanticMinScore,
+        maxRetrievedMemories: mem.maxRetrievedMemories,
+        sessionContextTokens: mem.sessionContextTokens,
       })
       memoryContext = result.contextBlock || null
     }
     if (pausedRef.current || controller.signal.aborted) return
 
     try {
-      const reply = await think(
+      // Tool-aware think: runs the supervised tool loop when tools are enabled
+      // and warranted, else a plain LLM turn. Falls back to think() on any issue.
+      const reply = await thinkWithTools(
         finalText,
         history,
         vitalsRef.current,
         controller.signal,
-        memoryContext
+        memoryContext,
+        sessionIdRef.current ?? ''
       )
       if (pausedRef.current || controller.signal.aborted) return
 

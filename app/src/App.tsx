@@ -8,6 +8,7 @@ import VoiceSettingsSheet from '@/sections/VoiceSettingsSheet'
 import JarvisSettingsSheet from '@/sections/JarvisSettingsSheet'
 import AiSettingsSheet from '@/sections/AiSettingsSheet'
 import MemorySettingsSheet from '@/sections/MemorySettingsSheet'
+import ToolSettingsSheet from '@/sections/ToolSettingsSheet'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
 import type { JarvisDisplayStatus } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
@@ -21,6 +22,7 @@ export default function App() {
   const [jarvisSettingsOpen, setJarvisSettingsOpen] = useState(false)
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false)
   const [memorySettingsOpen, setMemorySettingsOpen] = useState(false)
+  const [toolSettingsOpen, setToolSettingsOpen] = useState(false)
   const [inboxBriefOpen, setInboxBriefOpen] = useState(false)
   const { vitals, liveCount, loading, error, refresh, updatedAt } = useSystemVitals()
 
@@ -99,6 +101,7 @@ export default function App() {
           onOpenJarvisSettings={() => setJarvisSettingsOpen(true)}
           onOpenAiSettings={() => setAiSettingsOpen(true)}
           onOpenMemorySettings={() => setMemorySettingsOpen(true)}
+          onOpenToolSettings={() => setToolSettingsOpen(true)}
         />
       </div>
 
@@ -110,6 +113,7 @@ export default function App() {
       />
       <AiSettingsSheet open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
       <MemorySettingsSheet open={memorySettingsOpen} onOpenChange={setMemorySettingsOpen} />
+      <ToolSettingsSheet open={toolSettingsOpen} onOpenChange={setToolSettingsOpen} />
 
       <FeatureShowcase />
     </div>
