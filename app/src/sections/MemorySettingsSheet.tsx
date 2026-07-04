@@ -313,16 +313,31 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
             ))}
           </Section>
 
-          <Section title="Episodic (Obsidian)" phase="M3">
+          <Section title="Episodic (Obsidian)">
             <div className="flex items-center justify-between gap-3">
               <Label className="text-white/70">Enable layer</Label>
-              <Switch checked={settings.episodicMemoryEnabled} disabled />
+              <Switch
+                checked={settings.episodicMemoryEnabled}
+                onCheckedChange={v => set('episodicMemoryEnabled', v)}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70">Allow JARVIS to write notes</Label>
+              <Switch
+                checked={settings.allowAgentWrites}
+                onCheckedChange={v => set('allowAgentWrites', v)}
+              />
             </div>
             <Input
               className="bg-white/5 border-white/10 text-white/50 text-xs"
               value={settings.vaultPath}
-              disabled
+              onChange={e => set('vaultPath', e.target.value)}
             />
+            <p className="text-[9px] text-white/30">
+              Research-flavored turns are saved under{' '}
+              <span className="font-mono">{settings.episodicNamespace}jarvis/</span> and embedded.
+              Never overwrites your notes.
+            </p>
           </Section>
 
           <Section title="Procedural" phase="M4">

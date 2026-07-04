@@ -167,3 +167,33 @@ export async function syncMemory(): Promise<SyncResult | null> {
     return null
   }
 }
+
+export interface EpisodicWrite {
+  title: string
+  body: string
+  sessionId?: string
+  tags?: string[]
+  sources?: string[]
+}
+
+/**
+ * Write an episodic note to the vault (M3). Fire-and-forget safe — a failed
+ * write must never affect the voice flow.
+ */
+export async function writeEpisodic(note: EpisodicWrite): Promise<void> {
+  await post('/api/memory/episodic', {
+    title: note.title,
+    body: note.body,
+    sessionId: note.sessionId ?? '',
+    agentId: 'jarvis',
+    tags: note.tags ?? [],
+    sources: note.sources ?? [],
+  })
+}
+
+/** Client-side heuristic mirroring the runtime intent gate — is this worth persisting? */
+export function looksResearchy(text: string): boolean {
+  return /\b(how|why|what|set ?up|configure|install|research|decide|decision|explain|document)\b/i.test(
+    text
+  )
+}

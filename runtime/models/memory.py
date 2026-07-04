@@ -75,6 +75,23 @@ class SyncResponse(BaseModel):
     errors: list[str] = []
 
 
+class EpisodicWriteRequest(BaseModel):
+    title: str
+    body: str
+    sessionId: str = ""
+    agentId: str = "jarvis"
+    tags: list[str] = []
+    sources: list[str] = []
+
+
+class EpisodicWriteResponse(BaseModel):
+    written: bool = False
+    path: str | None = None
+    jarvis_id: str | None = None
+    chunks: int = 0
+    reason: str | None = None
+
+
 class StoreRequest(BaseModel):
     sessionId: str
     turn: Turn

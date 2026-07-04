@@ -9,7 +9,14 @@ import {
   isSpeechRecognitionSupported,
 } from '@/services/speech-recognition'
 import { getVoiceSettings, useVoiceSettings } from '@/stores/voice-settings-store'
-import { createSession, endSession, storeTurn, retrieveMemory } from '@/services/memory'
+import {
+  createSession,
+  endSession,
+  storeTurn,
+  retrieveMemory,
+  writeEpisodic,
+  looksResearchy,
+} from '@/services/memory'
 import {
   getMemorySettings,
   isMemoryPersistenceEnabled,
@@ -385,6 +392,24 @@ export function useRealtimeConversation(
         { id: assistantId, role: 'assistant', text: reply, timestamp: Date.now() },
       ])
       persistTurn(assistantId, 'assistant', reply)
+
+      // Episodic write (M3): capture research-flavored exchanges as vault notes.
+      // Gated + fire-and-forget; never blocks the reply or speech.
+      if (
+        sessionIdRef.current &&
+        isMemoryPersistenceEnabled() &&
+        mem.episodicMemoryEnabled &&
+        mem.allowAgentWrites &&
+        looksResearchy(finalText)
+      ) {
+        const title = finalText.split(/\s+/).slice(0, 8).join(' ')
+        void writeEpisodic({
+          title,
+          body: `## Question\n${finalText}\n\n## Answer\n${reply}`,
+          sessionId: sessionIdRef.current,
+          tags: ['conversation'],
+        })
+      }
       setPhase('speaking')
       try {
         await speakText(reply, cfg.voiceboxProfile)

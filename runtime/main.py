@@ -12,11 +12,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from memory import conversation, embedder, orchestrator, semantic, sync
+from memory import conversation, embedder, episodic, orchestrator, semantic, sync
 from memory.context_builder import build_context_block
 from models.memory import (
     CreateSessionRequest,
     CreateSessionResponse,
+    EpisodicWriteRequest,
+    EpisodicWriteResponse,
     HealthResponse,
     RetrieveRequest,
     RetrieveResponse,
@@ -135,3 +137,16 @@ async def search(body: SearchRequest) -> SearchResponse:
 async def trigger_sync() -> SyncResponse:
     result = await sync.reconcile()
     return SyncResponse(**result)
+
+
+@app.post("/api/memory/episodic", response_model=EpisodicWriteResponse)
+async def write_episodic(body: EpisodicWriteRequest) -> EpisodicWriteResponse:
+    result = await episodic.write_note(
+        title=body.title,
+        body=body.body,
+        agent_id=body.agentId,
+        session_id=body.sessionId,
+        tags=body.tags,
+        sources=body.sources,
+    )
+    return EpisodicWriteResponse(**result)
