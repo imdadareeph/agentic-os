@@ -62,6 +62,8 @@ const LIVE_CATEGORIES: { key: ToolCategory; label: string }[] = [
   { key: 'git', label: 'Git (read + commit)' },
   { key: 'docker', label: 'Docker (read + run/stop)' },
   { key: 'terminal', label: 'Terminal (approval-gated)' },
+  { key: 'browser', label: 'Browser (search + fetch, approval-gated)' },
+  { key: 'mcp', label: 'MCP (external servers, approval-gated)' },
 ]
 
 export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSheetProps) {
@@ -119,6 +121,22 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
                 ? 'Runtime offline — run npm run runtime:dev. Voice keeps working.'
                 : `${health?.toolCount ?? 0} tools loaded.`}
             </p>
+            {health?.mcpServers && Object.keys(health.mcpServers).length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(health.mcpServers).map(([name, healthy]) => (
+                  <span
+                    key={name}
+                    className={`text-[9px] tracking-wide px-1.5 py-0.5 rounded border ${
+                      healthy
+                        ? 'border-emerald-500/30 text-emerald-300/80'
+                        : 'border-red-500/30 text-red-300/70'
+                    }`}
+                  >
+                    mcp.{name} {healthy ? 'online' : 'degraded'}
+                  </span>
+                ))}
+              </div>
+            )}
           </Section>
 
           <Section title="Categories">
@@ -136,12 +154,6 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
                 />
               </div>
             ))}
-          </Section>
-
-          <Section title="Browser / MCP" phase="T3">
-            <p className="text-[9px] text-white/30">
-              External browser + MCP tools arrive in T3.
-            </p>
           </Section>
 
           <Section title="Permission posture">

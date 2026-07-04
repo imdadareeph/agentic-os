@@ -11,6 +11,11 @@ class ToolsHealthResponse(BaseModel):
     loaded: bool
     toolCount: int
     categories: dict[str, int] = {}
+    mcpServers: dict[str, bool] = {}
+
+
+class ToolsMcpRefreshResponse(BaseModel):
+    registered: int
 
 
 class ToolCatalogEntry(BaseModel):

@@ -6,11 +6,13 @@ Run: cd runtime && uv run uvicorn main:app --reload --port 8000
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from memory import (
     conversation,
@@ -60,10 +62,13 @@ from models.tools import (
     ToolPlanRequest,
     ToolPlanResponse,
     ToolsHealthResponse,
+    ToolsMcpRefreshResponse,
 )
+from tools import events as tool_events
 from tools import executor as tool_executor
 from tools import registry as tool_registry
 from tools import router as tool_router
+from tools.handlers import mcp_bridge
 from tools.loop import run_loop
 from tools.schemas import ToolContext
 
@@ -86,11 +91,14 @@ async def lifespan(app: FastAPI):
     retention_task = asyncio.create_task(_retention_loop(app))
     # Idle background worker: processes dirty turns/files only while the user is idle.
     jobs_task = asyncio.create_task(jobs.run_loop(app.state.db))
+    # Discover external MCP servers off the startup path (subprocess I/O; never blocks boot).
+    asyncio.create_task(tool_registry.refresh_mcp_tools())
     yield
     jobs_task.cancel()
     retention_task.cancel()
     sync.stop_watcher()
     sync.set_db(None)
+    await mcp_bridge.shutdown_all()
     await app.state.db.close()
 
 
@@ -293,7 +301,15 @@ async def tools_health() -> ToolsHealthResponse:
         loaded=True,
         toolCount=tool_registry.tool_count(),
         categories=tool_registry.category_counts(),
+        mcpServers=mcp_bridge.mcp_health(),
     )
+
+
+@app.post("/api/tools/mcp/refresh", response_model=ToolsMcpRefreshResponse)
+async def tools_mcp_refresh() -> ToolsMcpRefreshResponse:
+    """Re-discover external MCP servers and re-register their tools (TOOLS.md §13.3)."""
+    registered = await tool_registry.refresh_mcp_tools()
+    return ToolsMcpRefreshResponse(registered=registered)
 
 
 @app.get("/api/tools/catalog", response_model=ToolCatalogResponse)
@@ -347,6 +363,28 @@ async def tools_loop(body: ToolLoopRequest) -> ToolLoopResponse:
         posture=body.posture,
     )
     return ToolLoopResponse(**result)
+
+
+@app.get("/api/tools/events")
+async def tools_events() -> StreamingResponse:
+    """SSE stream of tool-execution lifecycle events (T3 §4, Notification Agent).
+
+    SSE over WebSocket: it's one-directional (server→client), needs no extra
+    client reconnect logic (browser EventSource auto-reconnects), and matches the
+    stub scope with plain FastAPI StreamingResponse. Each event is emitted as
+    `data: {json}\\n\\n`. The generator is cancelled on client disconnect, which
+    unregisters the subscriber queue in events.subscribe()'s finally block.
+    """
+
+    async def stream():
+        async for event in tool_events.subscribe():
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/tools/approve", response_model=ApproveResponse)

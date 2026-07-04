@@ -5,7 +5,7 @@ Skills/agents/MCP register dynamically in later phases; T0 is core-only.
 
 from __future__ import annotations
 
-from tools.handlers import docker, filesystem, git, memory_tools, terminal, vitals
+from tools.handlers import browser, docker, filesystem, git, mcp_bridge, memory_tools, terminal, vitals
 from tools.schemas import ToolDefinition
 
 _REGISTRY: dict[str, ToolDefinition] = {}
@@ -183,9 +183,31 @@ def _load_mutating_catalog() -> None:
     ))
 
 
+def _load_browser_catalog() -> None:
+    """Phase T3 (TOOLS.md) — web access; permission=ask, latency slow, never raises."""
+    _register(ToolDefinition(
+        name="browser.search", title="Web search",
+        description="Search the web (DuckDuckGo) and return titles, URLs, and snippets.",
+        category="browser",
+        parameters={"type": "object", "properties": {
+            "query": {"type": "string"},
+            "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 10},
+        }, "required": ["query"]},
+        permission="ask", latency_class="slow", handler=browser.search,
+    ))
+    _register(ToolDefinition(
+        name="browser.fetch", title="Fetch web page",
+        description="Fetch an http(s) URL and return its readable text (internal hosts blocked).",
+        category="browser",
+        parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+        permission="ask", latency_class="slow", handler=browser.fetch,
+    ))
+
+
 _load_core_catalog()
 _load_local_catalog()
 _load_mutating_catalog()
+_load_browser_catalog()
 
 
 def get_catalog(enabled_only: bool = True, categories: list[str] | None = None) -> list[ToolDefinition]:
@@ -203,6 +225,21 @@ def category_counts() -> dict[str, int]:
     for t in _REGISTRY.values():
         counts[t.category] = counts.get(t.category, 0) + 1
     return counts
+
+
+async def refresh_mcp_tools() -> int:
+    """Re-discover external MCP servers and (re)register their tools (TOOLS.md §13.3).
+
+    Async because discovery does subprocess I/O — this is NOT called at import
+    time (module load stays sync/offline). Stale ``mcp:*`` entries are removed
+    first so re-discovery never duplicates or leaves dead tools behind. Only
+    healthy servers' tools land in the registry (discovery filters unhealthy).
+    Returns the number of MCP tools now registered.
+    """
+    stale = [name for name, t in _REGISTRY.items() if t.source.startswith("mcp:")]
+    for name in stale:
+        _REGISTRY.pop(name, None)
+    return await mcp_bridge.register_mcp_tools(_register)
 
 
 def get_tool(name: str) -> ToolDefinition | None:

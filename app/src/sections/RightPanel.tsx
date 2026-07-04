@@ -12,6 +12,9 @@ import {
   type JarvisDisplayStatus,
 } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
+import { runSkill, pullMetricsViaTool } from '@/lib/command-deck-skills'
+import { useToolEvents } from '@/hooks/useToolEvents'
+import { toast } from 'sonner'
 
 const commands = [
   { id: 'inbox-brief', label: 'INBOX-BRIEF', active: false },
@@ -56,6 +59,7 @@ export default function RightPanel({
 }: RightPanelProps) {
   const [settings] = useVoiceSettings()
   const { voice, brain, loading: healthLoading } = useServiceHealth()
+  const { activeTools, lastError: toolError } = useToolEvents()
   const isConversation = settings.voiceMode === 'conversation'
 
   const push = useVoiceAssistant(
@@ -130,6 +134,12 @@ export default function RightPanel({
     const timer = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
+
+  // Notification area (T3 stub, CONVERSATION_AGENTS.md Notification Agent):
+  // surface tool failures as a toast. Running tools show inline in Command Deck.
+  useEffect(() => {
+    if (toolError) toast.error(toolError)
+  }, [toolError])
 
   const formatTime = (d: Date) => {
     const h = d.getHours().toString().padStart(2, '0')
@@ -232,7 +242,9 @@ export default function RightPanel({
         <div className="flex items-center justify-between mb-4">
           <span className="text-label">Command Deck</span>
           <span className="text-[9px] text-white/20 font-mono">
-            {activeCommands.size + (inboxBriefOpen ? 1 : 0)} ACTIVE
+            {activeTools.length > 0
+              ? `${activeTools[0]}…`
+              : `${activeCommands.size + (inboxBriefOpen ? 1 : 0)} ACTIVE`}
           </span>
         </div>
         <div className="grid grid-cols-2 gap-1.5">
@@ -253,6 +265,11 @@ export default function RightPanel({
                   onInboxBriefToggle?.()
                 } else if (cmd.id === 'metrics-pull') {
                   onMetricsPull?.()
+                  void pullMetricsViaTool()
+                } else if (cmd.id === 'plan-today') {
+                  void runSkill('plan-today')
+                } else if (cmd.id === 'am-report') {
+                  void runSkill('am-report')
                 } else if (cmd.id === 'new-session') {
                   if (isConversation) {
                     convo.clearSession()

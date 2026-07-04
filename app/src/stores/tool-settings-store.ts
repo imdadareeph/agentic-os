@@ -43,9 +43,9 @@ function defaultCategories(): Record<ToolCategory, boolean> {
     filesystem: true,
     git: true,
     docker: true,
-    terminal: false, // T2
-    browser: false, // T3
-    mcp: false, // T3
+    terminal: false, // approval-gated; user opts in explicitly
+    browser: false, // approval-gated + external network; user opts in explicitly
+    mcp: false, // external servers; user opts in explicitly
   }
 }
 

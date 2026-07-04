@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from memory import procedural
-from tools import approvals, permissions, registry
+from tools import approvals, events, permissions, registry
 from tools.handlers import filesystem, git
 from tools.schemas import ToolContext, ToolResult
 
@@ -57,11 +57,23 @@ async def execute(
                 tool_name=tool_name,
             )
 
+    # T3: broadcast execution lifecycle. events.publish never raises, but guard
+    # the call sites too so the notification path can never break tool execution.
+    events.publish(events.make_event("TOOL_STARTED", tool_name, ctx.session_id))
+
     start = time.monotonic()
     try:
         data = await tool.handler(args, ctx)
         duration_ms = int((time.monotonic() - start) * 1000)
         success = not (isinstance(data, dict) and data.get("error"))
+        if success:
+            events.publish(events.make_event("TOOL_EXECUTED", tool_name, ctx.session_id))
+        else:
+            events.publish(
+                events.make_event(
+                    "TOOL_FAILED", tool_name, ctx.session_id, error=str(data.get("error"))
+                )
+            )
         await procedural.record_tool_run(
             ctx.db,
             tool_name=tool_name,
@@ -77,6 +89,9 @@ async def execute(
         return ToolResult(ok=True, data=data)
     except Exception as err:
         duration_ms = int((time.monotonic() - start) * 1000)
+        events.publish(
+            events.make_event("TOOL_FAILED", tool_name, ctx.session_id, error=str(err))
+        )
         await procedural.record_tool_run(
             ctx.db,
             tool_name=tool_name,

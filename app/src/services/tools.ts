@@ -11,6 +11,7 @@ export interface ToolsHealth {
   loaded: boolean
   toolCount: number
   categories: Record<string, number>
+  mcpServers?: Record<string, boolean>
 }
 
 export interface ToolCatalogEntry {
@@ -64,6 +65,9 @@ export interface ToolExecuteResult {
   ok: boolean
   data?: unknown
   error?: string | null
+  needsApproval?: boolean
+  approvalId?: string | null
+  preview?: string | null
 }
 
 async function post(path: string, body: unknown): Promise<Response | null> {

@@ -10,6 +10,7 @@ import AiSettingsSheet from '@/sections/AiSettingsSheet'
 import MemorySettingsSheet from '@/sections/MemorySettingsSheet'
 import ToolSettingsSheet from '@/sections/ToolSettingsSheet'
 import ToolApprovalDialog from '@/components/ToolApprovalDialog'
+import { Toaster } from '@/components/ui/sonner'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
 import type { JarvisDisplayStatus } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
@@ -116,6 +117,7 @@ export default function App() {
       <MemorySettingsSheet open={memorySettingsOpen} onOpenChange={setMemorySettingsOpen} />
       <ToolSettingsSheet open={toolSettingsOpen} onOpenChange={setToolSettingsOpen} />
       <ToolApprovalDialog />
+      <Toaster position="bottom-right" richColors />
 
       <FeatureShowcase />
     </div>
