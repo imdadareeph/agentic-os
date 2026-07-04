@@ -30,8 +30,13 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+# Cursor — local AI docs & secrets (never commit do-not-commit unless explicitly told)
+.cursor/aidocs/do-not-commit/
 .cursor/
 .agents/
 
 # Local observability stack (separate repo)
 observability/
+# Python bytecode
+__pycache__/
+*.pyc
