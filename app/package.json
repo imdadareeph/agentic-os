@@ -11,7 +11,8 @@
     "voice:whisper": "docker compose -f ../docker-compose.voice.yml up",
     "voice:check": "curl -sf http://127.0.0.1:9000/v1/models | head -c 200 || echo 'Whisper not running — use npm run voice:whisper'",
     "runtime:dev": "cd ../runtime && uv run uvicorn main:app --reload --port 8000",
-    "runtime:check": "curl -sf http://127.0.0.1:8000/api/memory/health || echo 'Memory runtime not running — use npm run runtime:dev'"
+    "runtime:check": "curl -sf http://127.0.0.1:8000/api/memory/health || echo 'Memory runtime not running — use npm run runtime:dev'",
+    "runtime:test": "cd ../runtime && uv run pytest -q"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
