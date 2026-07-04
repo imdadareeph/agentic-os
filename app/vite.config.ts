@@ -35,6 +35,11 @@ const serviceProxy = {
     changeOrigin: true,
     rewrite: (p: string) => p.replace(/^\/gitnexus/, ''),
   },
+  '/runtime': {
+    target: 'http://127.0.0.1:8000',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/runtime/, ''),
+  },
 }
 
 // https://vite.dev/config/
