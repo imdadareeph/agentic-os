@@ -23,14 +23,15 @@ def test_t1_tools_registered():
 def test_catalog_category_filter():
     fs = registry.get_catalog(categories=["filesystem"])
     assert fs and all(t.category == "filesystem" for t in fs)
-    assert {t.name for t in fs} == {"filesystem.read", "filesystem.list"}
+    # T1 read tools are present (T2 adds write/delete on top).
+    assert {"filesystem.read", "filesystem.list"} <= {t.name for t in fs}
 
 
 def test_category_counts():
     counts = registry.category_counts()
-    assert counts.get("filesystem") == 2
-    assert counts.get("git") == 2
-    assert counts.get("docker") == 1
+    assert counts.get("filesystem", 0) >= 2
+    assert counts.get("git", 0) >= 2
+    assert counts.get("docker", 0) >= 1
 
 
 # --- filesystem allowlist ----------------------------------------------------

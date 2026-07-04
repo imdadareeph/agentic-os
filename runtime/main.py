@@ -49,6 +49,8 @@ from models.memory import (
     Turn,
 )
 from models.tools import (
+    ApproveRequest,
+    ApproveResponse,
     ToolCatalogEntry,
     ToolCatalogResponse,
     ToolExecuteRequest,
@@ -308,8 +310,11 @@ async def tools_execute(body: ToolExecuteRequest) -> ToolExecuteResponse:
         db=app.state.db, session_id=body.sessionId or None,
         agent_id=body.agentId, allowed_paths=body.allowedPaths,
     )
-    result = await tool_executor.execute(body.toolName, body.args, ctx)
-    return ToolExecuteResponse(ok=result.ok, data=result.data, error=result.error)
+    result = await tool_executor.execute(body.toolName, body.args, ctx, posture=body.posture)
+    return ToolExecuteResponse(
+        ok=result.ok, data=result.data, error=result.error,
+        needsApproval=result.needs_approval, approvalId=result.approval_id, preview=result.preview,
+    )
 
 
 @app.post("/api/tools/loop", response_model=ToolLoopResponse)
@@ -331,5 +336,31 @@ async def tools_loop(body: ToolLoopRequest) -> ToolLoopResponse:
         base_url=body.baseUrl,
         max_tokens=body.maxTokens,
         temperature=body.temperature,
+        posture=body.posture,
     )
     return ToolLoopResponse(**result)
+
+
+@app.post("/api/tools/approve", response_model=ApproveResponse)
+async def tools_approve(body: ApproveRequest) -> ApproveResponse:
+    """Resolve a pending tool approval (TOOLS.md §18). Approve -> execute now."""
+    from tools import approvals
+
+    pending = approvals.get(body.approvalId)
+    if pending is None or pending.status == "expired":
+        return ApproveResponse(approved=False, error="approval not found or expired")
+    approvals.decide(body.approvalId, body.approved)
+    if not body.approved:
+        approvals.clear(body.approvalId)
+        return ApproveResponse(approved=False, executed=False)
+
+    ctx = ToolContext(
+        db=app.state.db, session_id=body.sessionId or None,
+        agent_id=body.agentId, allowed_paths=body.allowedPaths,
+    )
+    # force=True: permission was already granted by the human here.
+    result = await tool_executor.execute(pending.tool_name, pending.args, ctx, force=True)
+    approvals.clear(body.approvalId)
+    return ApproveResponse(
+        approved=True, executed=True, ok=result.ok, data=result.data, error=result.error,
+    )

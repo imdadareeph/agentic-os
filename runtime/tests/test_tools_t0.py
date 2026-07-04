@@ -31,7 +31,10 @@ def test_registry_loads_t0_catalog():
         "time.now",
     } <= names
     assert registry.tool_count() >= 5
-    assert all(t.permission == "allow" and t.latency_class == "fast" for t in catalog)
+    # T0 core tools specifically are allow + fast (later phases add ask/slow tools).
+    t0 = {"vitals.fetch", "memory.search", "memory.retrieve", "system.status", "time.now"}
+    core = [t for t in catalog if t.name in t0]
+    assert all(t.permission == "allow" and t.latency_class == "fast" for t in core)
 
 
 def test_router_skips_greeting():

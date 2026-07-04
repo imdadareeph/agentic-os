@@ -1,4 +1,5 @@
-"""Tool Executor — validates args, calls the handler, logs the run (TOOLS.md §11)."""
+"""Tool Executor — validates args, gates on permission, calls the handler, logs
+the run (TOOLS.md §11). T2 adds posture-aware permission + approval creation."""
 
 from __future__ import annotations
 
@@ -7,21 +8,54 @@ import time
 from typing import Any
 
 from memory import procedural
-from tools import permissions, registry
+from tools import approvals, permissions, registry
+from tools.handlers import filesystem, git
 from tools.schemas import ToolContext, ToolResult
 
 
-async def execute(tool_name: str, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+async def _preview(tool_name: str, args: dict[str, Any]) -> str:
+    """Human-readable preview shown in the approval dialog."""
+    if tool_name == "git.commit":
+        diff = await git.staged_diff()
+        return f"commit -m {args.get('message', '')!r}\n{diff}"
+    if tool_name == "filesystem.write":
+        return filesystem.preview_write(args)
+    if tool_name == "terminal.run":
+        return f"$ {args.get('command', '')}"
+    if tool_name == "filesystem.delete":
+        return f"delete {args.get('path', '')}"
+    if tool_name == "docker.run":
+        return f"docker run {args.get('image', '')}"
+    if tool_name == "docker.stop":
+        return f"docker stop {args.get('name', '')}"
+    return json.dumps(args)[:280]
+
+
+async def execute(
+    tool_name: str,
+    args: dict[str, Any],
+    ctx: ToolContext,
+    posture: str = "balanced",
+    force: bool = False,
+) -> ToolResult:
     tool = registry.get_tool(tool_name)
     if tool is None or not tool.enabled:
         return ToolResult(ok=False, error=f"Unknown tool: {tool_name}")
 
-    level = permissions.check(tool, args)
-    if level == "deny":
-        return ToolResult(ok=False, error=f"{tool_name} is denied by policy")
-    if level == "ask":
-        # T2 wires the approval pause; T0/T1 tools never reach this branch.
-        return ToolResult(ok=False, error=f"{tool_name} requires approval (not yet implemented)")
+    if not force:
+        level = permissions.check(tool, args, posture)
+        if level == "deny":
+            return ToolResult(ok=False, error=f"{tool_name} is denied by policy")
+        if level == "ask":
+            preview = await _preview(tool_name, args)
+            p = approvals.create(tool_name, args, ctx.session_id, ctx.agent_id, preview)
+            return ToolResult(
+                ok=False,
+                needs_approval=True,
+                approval_id=p.approval_id,
+                preview=preview,
+                tool_name=tool_name,
+            )
 
     start = time.monotonic()
     try:

@@ -5,7 +5,7 @@ Skills/agents/MCP register dynamically in later phases; T0 is core-only.
 
 from __future__ import annotations
 
-from tools.handlers import docker, filesystem, git, memory_tools, vitals
+from tools.handlers import docker, filesystem, git, memory_tools, terminal, vitals
 from tools.schemas import ToolDefinition
 
 _REGISTRY: dict[str, ToolDefinition] = {}
@@ -130,8 +130,62 @@ def _load_local_catalog() -> None:
     ))
 
 
+def _load_mutating_catalog() -> None:
+    """Phase T2 (TOOLS.md §8/§9) — mutating tools; permission=ask by default."""
+    _register(ToolDefinition(
+        name="filesystem.write", title="Write file",
+        description="Write text to a file within the allowed paths.",
+        category="filesystem",
+        parameters={"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+        permission="ask", latency_class="fast", handler=filesystem.write,
+    ))
+    _register(ToolDefinition(
+        name="filesystem.delete", title="Delete file",
+        description="Delete a single file within the allowed paths.",
+        category="filesystem",
+        parameters={"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+        permission="ask", latency_class="fast", handler=filesystem.delete,
+    ))
+    _register(ToolDefinition(
+        name="terminal.run", title="Run shell command",
+        description="Run a shell command in the repo directory. Destructive commands are refused.",
+        category="terminal",
+        parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+        permission="ask", latency_class="slow", handler=terminal.run,
+    ))
+    _register(ToolDefinition(
+        name="git.commit", title="Git commit",
+        description="Stage all changes and commit with a message.",
+        category="git",
+        parameters={"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]},
+        permission="ask", latency_class="fast", handler=git.commit,
+    ))
+    _register(ToolDefinition(
+        name="docker.run", title="Docker run",
+        description="Start a container from an image (detached).",
+        category="docker",
+        parameters={"type": "object", "properties": {"image": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}}}, "required": ["image"]},
+        permission="ask", latency_class="slow", handler=docker.run,
+    ))
+    _register(ToolDefinition(
+        name="docker.stop", title="Docker stop",
+        description="Stop a running container by name.",
+        category="docker",
+        parameters={"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]},
+        permission="ask", latency_class="fast", handler=docker.stop,
+    ))
+    _register(ToolDefinition(
+        name="memory.episodic.write", title="Save vault note",
+        description="Write a durable note to the Obsidian vault under agents/.",
+        category="memory",
+        parameters={"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "body"]},
+        permission="ask", latency_class="fast", handler=memory_tools.episodic_write,
+    ))
+
+
 _load_core_catalog()
 _load_local_catalog()
+_load_mutating_catalog()
 
 
 def get_catalog(enabled_only: bool = True, categories: list[str] | None = None) -> list[ToolDefinition]:

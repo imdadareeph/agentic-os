@@ -71,6 +71,7 @@ async def run_loop(
     max_tokens: int = 1024,
     temperature: float | None = None,
     max_turns: int = MAX_TURNS,
+    posture: str = "balanced",
 ) -> dict[str, Any]:
     """Runs the multi-turn tool loop. Never raises — degrades on any failure."""
     if not api_key or not model:
@@ -121,13 +122,22 @@ async def run_loop(
 
         messages.append({"role": "assistant", "content": content})
         tool_results: list[dict[str, Any]] = []
+        approvals_needed: list[dict[str, Any]] = []
         for block in tool_use_blocks:
             name = block.get("name", "")
             args = block.get("input", {}) or {}
-            result = await executor.execute(name, args, ctx)
-            tool_runs.append(
-                {"tool": name, "success": result.ok, "error": result.error}
-            )
+            result = await executor.execute(name, args, ctx, posture=posture)
+            if result.needs_approval:
+                approvals_needed.append(
+                    {
+                        "approvalId": result.approval_id,
+                        "toolName": name,
+                        "args": args,
+                        "preview": result.preview,
+                    }
+                )
+                continue
+            tool_runs.append({"tool": name, "success": result.ok, "error": result.error})
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -136,6 +146,16 @@ async def run_loop(
                     "is_error": not result.ok,
                 }
             )
+
+        # Any tool needing approval pauses the loop — the frontend collects the
+        # decision and re-drives via /api/tools/approve. Voice speaks the ack.
+        if approvals_needed:
+            return {
+                "reply": "That needs your approval — check the dialog.",
+                "toolRuns": tool_runs,
+                "turns": turn,
+                "approvalRequired": approvals_needed,
+            }
         messages.append({"role": "user", "content": tool_results})
 
     return {

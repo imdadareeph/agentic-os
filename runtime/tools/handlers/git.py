@@ -41,3 +41,25 @@ async def log(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     if code != 0:
         return {"ok": False, "error": err.strip() or "git log failed"}
     return {"ok": True, "commits": out.strip().splitlines()}
+
+
+async def commit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """Stage all changes and commit (Phase T2, approval-gated)."""
+    message = str(args.get("message", "")).strip()
+    if not message:
+        return {"ok": False, "error": "commit message required"}
+    add_code, _, add_err = await _git("add", "-A")
+    if add_code != 0:
+        return {"ok": False, "error": add_err.strip() or "git add failed"}
+    code, out, err = await _git("commit", "-m", message)
+    if code != 0:
+        return {"ok": False, "error": err.strip() or out.strip() or "git commit failed"}
+    return {"ok": True, "output": out.strip()}
+
+
+async def staged_diff() -> str:
+    """Preview for the approval dialog: what a commit would include."""
+    _, out, _ = await _git("diff", "--staged", "--stat")
+    if not out.strip():
+        _, out, _ = await _git("diff", "--stat")  # nothing staged yet — show unstaged
+    return out.strip()[:2000] or "(no changes detected)"

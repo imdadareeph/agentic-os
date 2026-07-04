@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from memory import conversation, semantic, sync
+from memory import conversation, episodic, semantic, sync
 from memory.context_builder import build_context_block
 from tools.schemas import ToolContext
 
@@ -47,3 +47,13 @@ async def system_status(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any
 async def time_now(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     return {"iso": now.isoformat(), "timezone": "UTC"}
+
+
+async def episodic_write(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """memory.episodic.write (T2, approval-gated) — JARVIS saves a vault note."""
+    title = str(args.get("title", "")).strip() or "note"
+    body = str(args.get("body", "")).strip()
+    return await episodic.write_note(
+        title, body, agent_id=ctx.agent_id, session_id=ctx.session_id or "",
+        tags=list(args.get("tags", []) or []),
+    )

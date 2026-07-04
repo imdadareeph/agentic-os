@@ -70,6 +70,11 @@ class ToolResult:
     ok: bool
     data: Any | None = None
     error: str | None = None
+    # T2: set when a mutating tool needs user approval before it will run.
+    needs_approval: bool = False
+    approval_id: str | None = None
+    preview: str | None = None
+    tool_name: str | None = None
 
 
 @dataclass

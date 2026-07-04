@@ -59,3 +59,29 @@ async def list_dir(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     for child in sorted(target.iterdir()):
         entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
     return {"ok": True, "path": str(target), "entries": entries[:500]}
+
+
+async def write(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """Write text to a file within the allowlist (Phase T2, approval-gated)."""
+    path = args.get("path", "")
+    content = str(args.get("content", ""))
+    target = _resolve_within(path, ctx)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return {"ok": True, "path": str(target), "bytes": len(content.encode("utf-8"))}
+
+
+async def delete(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
+    """Delete a single file within the allowlist (Phase T2, approval-gated). No dirs."""
+    path = args.get("path", "")
+    target = _resolve_within(path, ctx)
+    if not target.is_file():
+        return {"ok": False, "error": f"Not a file (dir deletion refused): {path}"}
+    target.unlink()
+    return {"ok": True, "path": str(target), "deleted": True}
+
+
+def preview_write(args: dict) -> str:
+    content = str(args.get("content", ""))
+    head = content[:280]
+    return f"write {args.get('path', '?')} ({len(content)} chars)\n---\n{head}"

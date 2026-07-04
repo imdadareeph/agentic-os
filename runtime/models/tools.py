@@ -47,12 +47,16 @@ class ToolExecuteRequest(BaseModel):
     args: dict[str, Any] = {}
     agentId: str = "jarvis"
     allowedPaths: list[str] | None = None
+    posture: str = "balanced"
 
 
 class ToolExecuteResponse(BaseModel):
     ok: bool
     data: Any | None = None
     error: str | None = None
+    needsApproval: bool = False
+    approvalId: str | None = None
+    preview: str | None = None
 
 
 class ChatTurn(BaseModel):
@@ -69,6 +73,7 @@ class ToolLoopRequest(BaseModel):
     agentId: str = "jarvis"
     categories: list[str] | None = None
     allowedPaths: list[str] | None = None
+    posture: str = "balanced"  # cautious | balanced | trusted
     # Passed through from the browser's AI Settings — never persisted server-side,
     # never written into tool_runs (TOOLS.md §7: no secrets in tool schemas/logs).
     apiKey: str | None = None
@@ -84,9 +89,33 @@ class ToolRunSummary(BaseModel):
     error: str | None = None
 
 
+class ApprovalRequest(BaseModel):
+    approvalId: str
+    toolName: str
+    args: dict[str, Any] = {}
+    preview: str | None = None
+
+
 class ToolLoopResponse(BaseModel):
     reply: str | None = None
     toolRuns: list[ToolRunSummary] = []
     turns: int = 0
     degraded: bool = False
     reason: str | None = None
+    approvalRequired: list[ApprovalRequest] = []
+
+
+class ApproveRequest(BaseModel):
+    approvalId: str
+    approved: bool
+    sessionId: str = ""
+    agentId: str = "jarvis"
+    allowedPaths: list[str] | None = None
+
+
+class ApproveResponse(BaseModel):
+    approved: bool
+    executed: bool = False
+    ok: bool = False
+    data: Any | None = None
+    error: str | None = None
