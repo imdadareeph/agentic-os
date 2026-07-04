@@ -12,7 +12,16 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from memory import conversation, embedder, episodic, orchestrator, semantic, sync
+from memory import (
+    conversation,
+    embedder,
+    episodic,
+    orchestrator,
+    procedural,
+    retention,
+    semantic,
+    sync,
+)
 from memory.context_builder import build_context_block
 from models.memory import (
     CreateSessionRequest,
@@ -20,6 +29,8 @@ from models.memory import (
     EpisodicWriteRequest,
     EpisodicWriteResponse,
     HealthResponse,
+    MaintenanceRequest,
+    MaintenanceResponse,
     RetrieveRequest,
     RetrieveResponse,
     SearchRequest,
@@ -27,8 +38,13 @@ from models.memory import (
     SemanticHit,
     StoreRequest,
     SyncResponse,
+    ToolRunRequest,
+    ToolRunResponse,
     Turn,
 )
+
+# Daily retention sweep interval.
+_RETENTION_INTERVAL_S = 24 * 60 * 60
 
 
 @asynccontextmanager
@@ -41,9 +57,21 @@ async def lifespan(app: FastAPI):
     if sync.vault_ready():
         asyncio.create_task(sync.reconcile())
         sync.start_watcher(loop)
+    retention_task = asyncio.create_task(_retention_loop(app))
     yield
+    retention_task.cancel()
     sync.stop_watcher()
     await app.state.db.close()
+
+
+async def _retention_loop(app: FastAPI) -> None:
+    """Daily background retention sweep. Errors are swallowed so it never dies."""
+    while True:
+        await asyncio.sleep(_RETENTION_INTERVAL_S)
+        try:
+            await retention.run_retention(app.state.db)
+        except Exception:
+            pass
 
 
 app = FastAPI(title="Agentic OS Memory Runtime", version="0.2.0", lifespan=lifespan)
@@ -150,3 +178,28 @@ async def write_episodic(body: EpisodicWriteRequest) -> EpisodicWriteResponse:
         sources=body.sources,
     )
     return EpisodicWriteResponse(**result)
+
+
+@app.post("/api/memory/tool-run", response_model=ToolRunResponse)
+async def record_tool_run(body: ToolRunRequest) -> ToolRunResponse:
+    """Procedural memory (M4). Ready for the Tool Registry to call once it ships."""
+    run_id = await procedural.record_tool_run(
+        app.state.db,
+        tool_name=body.toolName,
+        success=body.success,
+        session_id=body.sessionId,
+        agent_id=body.agentId,
+        input_json=body.inputJson,
+        output_json=body.outputJson,
+        duration_ms=body.durationMs,
+    )
+    return ToolRunResponse(id=run_id)
+
+
+@app.post("/api/memory/maintenance", response_model=MaintenanceResponse)
+async def maintenance(body: MaintenanceRequest) -> MaintenanceResponse:
+    """Manually trigger the retention/archive sweep (also runs daily in the background)."""
+    result = await retention.run_retention(
+        app.state.db, body.conversationDays, body.proceduralDays
+    )
+    return MaintenanceResponse(**result)

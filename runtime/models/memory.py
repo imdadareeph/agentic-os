@@ -92,6 +92,31 @@ class EpisodicWriteResponse(BaseModel):
     reason: str | None = None
 
 
+class ToolRunRequest(BaseModel):
+    toolName: str
+    success: bool
+    sessionId: str | None = None
+    agentId: str = "jarvis"
+    inputJson: str | None = None
+    outputJson: str | None = None
+    durationMs: int | None = None
+
+
+class ToolRunResponse(BaseModel):
+    id: str
+
+
+class MaintenanceRequest(BaseModel):
+    conversationDays: int = 30
+    proceduralDays: int = 90
+
+
+class MaintenanceResponse(BaseModel):
+    archived_sessions: int = 0
+    archived_turns: int = 0
+    pruned_tool_runs: int = 0
+
+
 class StoreRequest(BaseModel):
     sessionId: str
     turn: Turn

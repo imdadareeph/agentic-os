@@ -171,8 +171,10 @@ def stop_watcher() -> None:
 
 
 async def ensure_migrations(conn) -> None:
-    """Apply the M2 migration (sync_files) idempotently."""
-    mig = Path(__file__).resolve().parent.parent / "db" / "migrations" / "0002_semantic.sql"
-    if mig.exists():
+    """Apply every migration in db/migrations/ in order, idempotently."""
+    mig_dir = Path(__file__).resolve().parent.parent / "db" / "migrations"
+    if not mig_dir.is_dir():
+        return
+    for mig in sorted(mig_dir.glob("*.sql")):
         await conn.executescript(mig.read_text())
-        await conn.commit()
+    await conn.commit()
