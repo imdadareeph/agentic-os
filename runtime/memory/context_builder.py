@@ -49,3 +49,17 @@ def build_context_block(
     block = "\n".join(lines).strip()
     # Nothing but the header survived the token budget — inject nothing.
     return "" if block == "\n".join(header).strip() else block
+
+
+def build_procedural_block(runs: list[dict]) -> str:
+    """Format recent tool runs (orchestrator.procedural_hits) for the prompt (T2).
+
+    Each run is ``{"tool", "success", "when"}``. Empty list injects nothing.
+    """
+    if not runs:
+        return ""
+    lines = ["## Prior tool usage"]
+    for run in runs:
+        status = "success" if run.get("success") else "failure"
+        lines.append(f"- {run.get('tool', 'tool')} ({run.get('when', '')}): {status}")
+    return "\n".join(lines)

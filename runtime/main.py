@@ -25,7 +25,7 @@ from memory import (
     semantic,
     sync,
 )
-from memory.context_builder import build_context_block
+from memory.context_builder import build_context_block, build_procedural_block
 from models.memory import (
     CreateSessionRequest,
     CreateSessionResponse,
@@ -161,16 +161,24 @@ async def retrieve(body: RetrieveRequest) -> RetrieveResponse:
         hits = await orchestrator.semantic_hits(
             body.userMessage, top_k, body.semanticMinScore
         )
+    # T2: surface recent tool runs when the message reads as retry/debug intent.
+    procedural_runs = await orchestrator.procedural_hits(
+        app.state.db, body.userMessage
+    )
+    context_block = build_context_block(
+        hits,
+        max_memories=body.maxRetrievedMemories,
+        max_tokens=body.sessionContextTokens,
+    )
+    procedural_block = build_procedural_block(procedural_runs)
+    if procedural_block:
+        context_block = "\n\n".join(b for b in (context_block, procedural_block) if b)
     return RetrieveResponse(
         conversation=[Turn(**t) for t in turns],
         semantic=[SemanticHit(**h) for h in hits],
         episodic=[],
-        procedural=[],
-        contextBlock=build_context_block(
-            hits,
-            max_memories=body.maxRetrievedMemories,
-            max_tokens=body.sessionContextTokens,
-        ),
+        procedural=procedural_runs,
+        contextBlock=context_block,
     )
 
 

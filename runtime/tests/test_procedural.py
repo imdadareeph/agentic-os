@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from memory import conversation, procedural, retention
+from memory import conversation, orchestrator, procedural, retention
+from memory.context_builder import build_procedural_block
 
 
 @pytest.fixture
@@ -86,3 +87,58 @@ async def test_retention_prunes_old_tool_runs(db):
     assert result["pruned_tool_runs"] == 1
     runs = await procedural.recent_tool_runs(db)
     assert [r["tool_name"] for r in runs] == ["fresh"]
+
+
+# --- T2: procedural retrieval (orchestrator + context_builder) ---
+
+
+@pytest.mark.parametrize(
+    "msg",
+    [
+        "how did we start Docker last time?",
+        "what was that command we ran",
+        "did we run the migration already",
+        "what tools do we have for this",
+        "how do we usually deploy",
+        "we previously ran the seed script",
+    ],
+)
+def test_is_procedural_intent_true(msg):
+    assert orchestrator.is_procedural_intent(msg) is True
+
+
+@pytest.mark.parametrize(
+    "msg",
+    ["", "hi", "hello there", "thanks", "download this video", "make it dark"],
+)
+def test_is_procedural_intent_false(msg):
+    assert orchestrator.is_procedural_intent(msg) is False
+
+
+async def test_procedural_hits_on_debug_intent(db):
+    await procedural.record_tool_run(db, "docker.run", True, duration_ms=120)
+    await procedural.record_tool_run(db, "fs.read", False)
+    hits = await orchestrator.procedural_hits(db, "how did we start Docker last time?")
+    assert len(hits) == 2
+    assert set(hits[0].keys()) == {"tool", "success", "when"}
+    assert {h["tool"] for h in hits} == {"docker.run", "fs.read"}
+
+
+async def test_procedural_hits_empty_on_greeting(db):
+    await procedural.record_tool_run(db, "docker.run", True)
+    assert await orchestrator.procedural_hits(db, "hi there") == []
+
+
+def test_build_procedural_block_formatting():
+    runs = [
+        {"tool": "docker.run", "success": True, "when": "2026-07-04T10:00:00+00:00"},
+        {"tool": "fs.read", "success": False, "when": "2026-07-04T09:00:00+00:00"},
+    ]
+    block = build_procedural_block(runs)
+    assert block.startswith("## Prior tool usage")
+    assert "- docker.run (2026-07-04T10:00:00+00:00): success" in block
+    assert "- fs.read (2026-07-04T09:00:00+00:00): failure" in block
+
+
+def test_build_procedural_block_empty():
+    assert build_procedural_block([]) == ""

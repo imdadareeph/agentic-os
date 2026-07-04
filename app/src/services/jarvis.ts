@@ -14,7 +14,8 @@ import {
   enabledCategories,
   getToolSettings,
 } from '@/stores/tool-settings-store'
-import { planTools, runToolLoop } from '@/services/tools'
+import { planTools, runToolLoop, approveTool } from '@/services/tools'
+import { requestApprovals } from '@/lib/tool-approval-broker'
 import type { VitalsResponse } from '@/types/vitals'
 import { speakText } from '@/services/voice'
 
@@ -108,7 +109,32 @@ export async function thinkWithTools(
     baseUrl: cfg.baseUrl,
     maxTokens: effectiveMaxTokens(settings),
     temperature: settings.temperature,
+    posture: toolCfg.defaultPermission,
   })
+
+  // A mutating tool needs approval: ask the user via the dialog, then run the
+  // approved ones. The loop is paused server-side; we speak the outcome.
+  if (result?.approvalRequired?.length) {
+    const allowedPaths = toolCfg.allowedPaths.length ? toolCfg.allowedPaths : undefined
+    const decisions = await requestApprovals(
+      result.approvalRequired.map(a => ({
+        approvalId: a.approvalId,
+        toolName: a.toolName,
+        args: a.args,
+        preview: a.preview,
+      }))
+    )
+    const outcomes: string[] = []
+    for (const req of result.approvalRequired) {
+      const approved = decisions[req.approvalId] === true
+      const res = await approveTool(req.approvalId, approved, sessionId, allowedPaths)
+      if (!approved) outcomes.push(`${req.toolName}: skipped (you declined)`)
+      else if (res.ok) outcomes.push(`${req.toolName}: done`)
+      else outcomes.push(`${req.toolName}: failed — ${res.error ?? 'error'}`)
+    }
+    const ack = result.reply ? `${result.reply}\n` : ''
+    return `${ack}${outcomes.join('. ')}.`
+  }
 
   // Degraded / no reply / runtime down → fall back to the normal path.
   if (!result || result.degraded || !result.reply) {

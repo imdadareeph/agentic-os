@@ -36,12 +36,28 @@ export interface ToolRunSummary {
   error?: string | null
 }
 
+export interface ApprovalRequestItem {
+  approvalId: string
+  toolName: string
+  args: Record<string, unknown>
+  preview?: string | null
+}
+
 export interface ToolLoopResult {
   reply: string | null
   toolRuns: ToolRunSummary[]
   turns: number
   degraded: boolean
   reason?: string | null
+  approvalRequired?: ApprovalRequestItem[]
+}
+
+export interface ApproveResult {
+  approved: boolean
+  executed: boolean
+  ok: boolean
+  data?: unknown
+  error?: string | null
 }
 
 export interface ToolExecuteResult {
@@ -111,6 +127,7 @@ export interface ToolLoopArgs {
   sessionId?: string
   categories?: string[]
   allowedPaths?: string[]
+  posture?: string
   apiKey?: string
   model?: string
   baseUrl?: string
@@ -125,6 +142,22 @@ export async function runToolLoop(args: ToolLoopArgs): Promise<ToolLoopResult | 
     return (await res.json()) as ToolLoopResult
   } catch {
     return null
+  }
+}
+
+/** Resolve a pending approval. Approve -> runtime executes now. Never throws. */
+export async function approveTool(
+  approvalId: string,
+  approved: boolean,
+  sessionId = '',
+  allowedPaths?: string[]
+): Promise<ApproveResult> {
+  const res = await post('/api/tools/approve', { approvalId, approved, sessionId, allowedPaths })
+  if (!res || !res.ok) return { approved: false, executed: false, ok: false, error: 'runtime unavailable' }
+  try {
+    return (await res.json()) as ApproveResult
+  } catch {
+    return { approved: false, executed: false, ok: false, error: 'bad response' }
   }
 }
 

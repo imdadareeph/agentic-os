@@ -9,6 +9,7 @@ import JarvisSettingsSheet from '@/sections/JarvisSettingsSheet'
 import AiSettingsSheet from '@/sections/AiSettingsSheet'
 import MemorySettingsSheet from '@/sections/MemorySettingsSheet'
 import ToolSettingsSheet from '@/sections/ToolSettingsSheet'
+import ToolApprovalDialog from '@/components/ToolApprovalDialog'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
 import type { JarvisDisplayStatus } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
@@ -114,6 +115,7 @@ export default function App() {
       <AiSettingsSheet open={aiSettingsOpen} onOpenChange={setAiSettingsOpen} />
       <MemorySettingsSheet open={memorySettingsOpen} onOpenChange={setMemorySettingsOpen} />
       <ToolSettingsSheet open={toolSettingsOpen} onOpenChange={setToolSettingsOpen} />
+      <ToolApprovalDialog />
 
       <FeatureShowcase />
     </div>

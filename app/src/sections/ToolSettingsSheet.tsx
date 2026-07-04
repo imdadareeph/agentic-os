@@ -58,9 +58,10 @@ function Section({
 const LIVE_CATEGORIES: { key: ToolCategory; label: string }[] = [
   { key: 'memory', label: 'Memory' },
   { key: 'system', label: 'System' },
-  { key: 'filesystem', label: 'Filesystem (read)' },
-  { key: 'git', label: 'Git (read)' },
-  { key: 'docker', label: 'Docker (read)' },
+  { key: 'filesystem', label: 'Filesystem (read + write)' },
+  { key: 'git', label: 'Git (read + commit)' },
+  { key: 'docker', label: 'Docker (read + run/stop)' },
+  { key: 'terminal', label: 'Terminal (approval-gated)' },
 ]
 
 export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSheetProps) {
@@ -137,9 +138,37 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
             ))}
           </Section>
 
-          <Section title="Terminal / Browser / MCP" phase="T2–T3">
+          <Section title="Browser / MCP" phase="T3">
             <p className="text-[9px] text-white/30">
-              Mutating shell, browser, and MCP tools arrive with the approval UX.
+              External browser + MCP tools arrive in T3.
+            </p>
+          </Section>
+
+          <Section title="Permission posture">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70 text-xs">
+                {settings.defaultPermission} — mutating tools{' '}
+                {settings.defaultPermission === 'trusted' ? 'auto-run' : 'need approval'}
+              </Label>
+              <div className="flex gap-1">
+                {(['cautious', 'balanced', 'trusted'] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => set('defaultPermission', p)}
+                    className={`rounded px-2 py-1 text-[10px] transition-colors ${
+                      settings.defaultPermission === p
+                        ? 'bg-amber-500/20 text-amber-300'
+                        : 'text-white/40 hover:text-white/70'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-[9px] text-white/30">
+              Destructive shell commands are always refused, even in trusted.
             </p>
           </Section>
 
