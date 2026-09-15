@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { Routes, Route } from 'react-router'
 import StatusBar from '@/components/StatusBar'
 import LeftPanel from '@/sections/LeftPanel'
 import CenterPanel from '@/sections/CenterPanel'
@@ -14,8 +15,18 @@ import { Toaster } from '@/components/ui/sonner'
 import { useSystemVitals } from '@/hooks/useSystemVitals'
 import type { JarvisDisplayStatus } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
+import MemoryGalaxyPage from '@/pages/MemoryGalaxyPage'
 
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<MissionControlPage />} />
+      <Route path="/memory" element={<MemoryGalaxyPage />} />
+    </Routes>
+  )
+}
+
+function MissionControlPage() {
   const [voiceVolume, setVoiceVolume] = useState(0)
   const [jarvisStatus, setJarvisStatus] = useState<JarvisDisplayStatus>('sleeping')
   const [voiceMode, setVoiceMode] = useState<'conversation' | 'push'>('conversation')
@@ -73,6 +84,7 @@ export default function App() {
               liveCount={liveCount}
               loading={loading}
               error={error}
+              sessionActive={sessionActive}
             />
           </div>
 

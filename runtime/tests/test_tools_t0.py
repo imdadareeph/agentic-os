@@ -86,6 +86,28 @@ async def test_executor_unknown_tool(db):
     assert "Unknown tool" in result.error
 
 
+async def test_procedural_enabled_true_logs_tool_run(db):
+    ctx = ToolContext(db=db, session_id=None, agent_id="jarvis")
+    result = await executor.execute("time.now", {}, ctx, procedural_enabled=True)
+    assert result.ok is True
+
+    from memory import procedural
+
+    runs = await procedural.recent_tool_runs(db, tool_name="time.now")
+    assert len(runs) == 1
+
+
+async def test_procedural_enabled_false_skips_tool_run_logging(db):
+    ctx = ToolContext(db=db, session_id=None, agent_id="jarvis")
+    result = await executor.execute("time.now", {}, ctx, procedural_enabled=False)
+    assert result.ok is True
+
+    from memory import procedural
+
+    runs = await procedural.recent_tool_runs(db, tool_name="time.now")
+    assert runs == []
+
+
 async def test_loop_degrades_without_api_key(db):
     ctx = ToolContext(db=db, session_id=None, agent_id="jarvis")
     result = await run_loop(

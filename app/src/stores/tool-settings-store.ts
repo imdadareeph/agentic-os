@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { getMemorySettings } from '@/stores/memory-settings-store'
 
 export const TOOL_SETTINGS_SCHEMA_VERSION = 1
 const STORAGE_KEY = 'agentic-os-tool-settings'
@@ -12,6 +13,7 @@ export type ToolCategory =
   | 'terminal'
   | 'browser'
   | 'mcp'
+  | 'skill'
 export type DefaultPermission = 'cautious' | 'balanced' | 'trusted'
 
 export interface ToolSettings {
@@ -46,6 +48,7 @@ function defaultCategories(): Record<ToolCategory, boolean> {
     terminal: false, // approval-gated; user opts in explicitly
     browser: false, // approval-gated + external network; user opts in explicitly
     mcp: false, // external servers; user opts in explicitly
+    skill: true, // composite first-party skills; each still permission-gated per tool
   }
 }
 
@@ -100,10 +103,21 @@ export function getToolSettings(): ToolSettings {
   return loadToolSettings()
 }
 
-/** Tools run only when master + session are both on. */
+/**
+ * Tools run only when master + session are both on, AND the memory-settings
+ * incognito flag is off — incognito means "nothing about this session is
+ * recorded", and tool execution both hits tool_runs and can write to the
+ * vault (memory.episodic.write), so it must be gated the same way retrieval/
+ * storage already are (memory.md §4.1).
+ */
 export function areToolsActive(): boolean {
   const s = getToolSettings()
-  return s.toolsEnabled && s.toolsEnabledForSession
+  if (!s.toolsEnabled || !s.toolsEnabledForSession) return false
+  try {
+    return !getMemorySettings().incognitoMode
+  } catch {
+    return true
+  }
 }
 
 /** Enabled category names for catalog/plan filtering. */

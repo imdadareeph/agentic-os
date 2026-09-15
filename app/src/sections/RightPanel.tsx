@@ -12,14 +12,20 @@ import {
   type JarvisDisplayStatus,
 } from '@/lib/jarvis-status'
 import type { VitalsResponse } from '@/types/vitals'
-import { runSkill, pullMetricsViaTool } from '@/lib/command-deck-skills'
-import { useToolEvents } from '@/hooks/useToolEvents'
+import { runSkill, runDirectSkill, runResearchSkill, pullMetricsViaTool } from '@/lib/command-deck-skills'
+import { useNotifications } from '@/hooks/useNotifications'
 import { toast } from 'sonner'
+import { writeEpisodic } from '@/services/memory'
+import {
+  getConversationWindow,
+  formatConversationTranscript,
+  deriveConversationTitle,
+} from '@/lib/transcript'
 
 const commands = [
   { id: 'inbox-brief', label: 'INBOX-BRIEF', active: false },
   { id: 'metrics-pull', label: 'METRICS-PULL', active: false },
-  { id: 'inbox-brief-2', label: 'INBOX-BRIEF', active: false },
+  { id: 'research', label: 'RESEARCH', active: false },
   { id: 'am-report', label: 'AM-REPORT', active: false },
   { id: 'trend-scan', label: 'TREND-SCAN', active: false },
   { id: 'gh-trending', label: 'GH-TRENDING', active: false },
@@ -59,7 +65,7 @@ export default function RightPanel({
 }: RightPanelProps) {
   const [settings] = useVoiceSettings()
   const { voice, brain, loading: healthLoading } = useServiceHealth()
-  const { activeTools, lastError: toolError } = useToolEvents()
+  const { activeTools } = useNotifications()
   const isConversation = settings.voiceMode === 'conversation'
 
   const push = useVoiceAssistant(
@@ -78,6 +84,7 @@ export default function RightPanel({
   const [audioBars, setAudioBars] = useState<AudioBar[]>(
     Array.from({ length: 24 }, () => ({ height: 3, targetHeight: 3 }))
   )
+  const [savingConversation, setSavingConversation] = useState(false)
 
   const phase = isConversation ? convo.phase : push.phase
   const volume = isConversation ? convo.volume : push.volume
@@ -102,7 +109,8 @@ export default function RightPanel({
     (phase === 'processing' ||
       phase === 'refining' ||
       phase === 'thinking' ||
-      phase === 'speaking')
+      phase === 'speaking' ||
+      phase === 'terminating')
 
   const sessionOpen = isJarvisSessionOpen(statusInput)
 
@@ -117,6 +125,41 @@ export default function RightPanel({
   const sessionActive = isConversation
     ? convo.conversationActive || convo.conversationPaused
     : push.phase !== 'idle'
+
+  const conversationWindow = isConversation ? getConversationWindow(convo.turns) : null
+  const showSaveBanner =
+    isConversation &&
+    !convo.conversationActive &&
+    !convo.conversationPaused &&
+    conversationWindow !== null
+
+  const handleSaveConversation = useCallback(async () => {
+    if (!conversationWindow) return
+    setSavingConversation(true)
+    try {
+      const title = deriveConversationTitle(convo.turns)
+      const body = formatConversationTranscript(convo.turns, conversationWindow)
+      const ok = await writeEpisodic({
+        title,
+        body,
+        agentId: 'conversations',
+        tags: ['conversation'],
+      })
+      if (ok) {
+        convo.clearSession()
+      } else {
+        toast.error('Could not save conversation to memory')
+      }
+    } catch {
+      toast.error('Could not save conversation to memory')
+    } finally {
+      setSavingConversation(false)
+    }
+  }, [conversationWindow, convo])
+
+  const handleCancelConversation = useCallback(() => {
+    convo.clearSession()
+  }, [convo])
 
   useJarvisAmbient({
     sessionActive,
@@ -135,11 +178,9 @@ export default function RightPanel({
     return () => clearInterval(timer)
   }, [])
 
-  // Notification area (T3 stub, CONVERSATION_AGENTS.md Notification Agent):
-  // surface tool failures as a toast. Running tools show inline in Command Deck.
-  useEffect(() => {
-    if (toolError) toast.error(toolError)
-  }, [toolError])
+  // Tool notifications (failures + task completion) are dispatched by the
+  // Notification Agent via useNotifications above; running tools show inline in
+  // the Command Deck header below.
 
   const formatTime = (d: Date) => {
     const h = d.getHours().toString().padStart(2, '0')
@@ -267,9 +308,17 @@ export default function RightPanel({
                   onMetricsPull?.()
                   void pullMetricsViaTool()
                 } else if (cmd.id === 'plan-today') {
-                  void runSkill('plan-today')
+                  void runDirectSkill('skill.plan_today', 'Plan Today')
                 } else if (cmd.id === 'am-report') {
-                  void runSkill('am-report')
+                  void runDirectSkill('skill.am_report', 'AM Report')
+                } else if (cmd.id === 'research') {
+                  void runResearchSkill()
+                } else if (cmd.id === 'trend-scan') {
+                  void runSkill('trend-scan')
+                } else if (cmd.id === 'gh-trending') {
+                  void runSkill('gh-trending')
+                } else if (cmd.id === 'wk-review') {
+                  void runSkill('wk-review')
                 } else if (cmd.id === 'new-session') {
                   if (isConversation) {
                     convo.clearSession()
@@ -425,20 +474,18 @@ export default function RightPanel({
           {isConversation &&
             convo.turns.map(turn => (
               <div key={turn.id}>
-                <div
+                <p
                   className={`text-[8px] uppercase tracking-widest mb-1 ${
                     turn.role === 'user' ? 'text-white/25' : 'text-amber-400/50'
                   }`}
                 >
+                  <span aria-hidden="true">{'— '}</span>
                   {turn.role === 'user' ? 'You' : 'JARVIS'}
-                  {turn.refined && (
-                    <span className="text-white/15 ml-1">· refined</span>
-                  )}
-                </div>
+                  {turn.refined && <span className="text-white/15">{' (refined)'}</span>}
+                  {':'}
+                </p>
                 <p
-                  className={
-                    turn.role === 'user' ? 'text-white/60' : 'text-amber-100/70'
-                  }
+                  className={turn.role === 'user' ? 'text-white/60' : 'text-amber-100/70'}
                 >
                   {turn.text}
                 </p>
@@ -464,6 +511,36 @@ export default function RightPanel({
             <p className="text-red-400/80 text-[9px]">{displayError}</p>
           )}
         </div>
+
+        {showSaveBanner && conversationWindow && (
+          <div className="mt-3 p-3 border border-amber-400/30 bg-amber-400/5 space-y-2">
+            <p className="text-[9px] text-white/50 uppercase tracking-widest">
+              Conversation ended
+            </p>
+            <p className="text-[9px] text-white/30 font-mono">
+              {new Date(conversationWindow.startedAt).toLocaleTimeString([], { hour12: false })}
+              {' – '}
+              {new Date(conversationWindow.endedAt).toLocaleTimeString([], { hour12: false })}
+            </p>
+            <div className="flex gap-1.5 pt-1">
+              <button
+                onClick={() => void handleSaveConversation()}
+                disabled={savingConversation}
+                className="flex-1 py-2 border border-amber-400/60 bg-amber-400/10 text-amber-300 text-[10px] tracking-widest uppercase flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {savingConversation && <Loader2 size={12} className="animate-spin" />}
+                {savingConversation ? 'Saving…' : 'Save to Memory'}
+              </button>
+              <button
+                onClick={handleCancelConversation}
+                disabled={savingConversation}
+                className="px-4 py-2 border border-white/10 text-white/30 hover:border-white/30 hover:text-white/60 hover:bg-white/5 text-[10px] tracking-widest uppercase disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {showWaveform && (
           <div className="mt-3">

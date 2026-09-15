@@ -51,6 +51,17 @@ class ToolDefinition:
             "input_schema": self.parameters,
         }
 
+    def to_openai_schema(self) -> dict[str, Any]:
+        """OpenAI-style function schema — used for the Ollama tool-calling path."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
     def to_public_dict(self) -> dict[str, Any]:
         """Catalog entry for the frontend — omits the handler callable."""
         return {

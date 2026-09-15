@@ -27,6 +27,7 @@ import { getOllamaModels } from '@/services/llm/ollama'
 import { checkProviderHealth } from '@/services/llm/router'
 import {
   getDefaultAiSettings,
+  isValidAdminCode,
   resetAiSettings,
   updateAiProvider,
   useAiSettings,
@@ -216,10 +217,26 @@ function ProviderPanel({
 export default function AiSettingsSheet({ open, onOpenChange }: AiSettingsSheetProps) {
   const [settings, update] = useAiSettings()
   const [expanded, setExpanded] = useState<AiProviderId>('ollama')
+  const [adminCodeError, setAdminCodeError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) setExpanded(settings.activeProvider)
   }, [open, settings.activeProvider])
+
+  const handleAdminCodeChange = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 4)
+    update({ adminAuthorizationCode: digits })
+    setAdminCodeError(null)
+  }
+
+  const handleAdminCodeBlur = () => {
+    const code = settings.adminAuthorizationCode
+    if (code && !isValidAdminCode(code)) {
+      setAdminCodeError('Must be 3 or 4 digits')
+    } else {
+      setAdminCodeError(null)
+    }
+  }
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -272,6 +289,34 @@ export default function AiSettingsSheet({ open, onOpenChange }: AiSettingsSheetP
                   }}
                 />
               ))}
+            </div>
+          </Section>
+
+          <Section title="Admin authorization">
+            <div>
+              <Label className="text-white/70 text-xs">Admin authorization code</Label>
+              <p className="text-[9px] text-white/25 mt-1 mb-2">
+                3–4 digit code required for voice shutdown or terminate commands.
+              </p>
+              <Input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
+                className="bg-white/5 border-white/10 text-white/80 text-xs font-mono tracking-[0.3em] max-w-[8rem]"
+                value={settings.adminAuthorizationCode}
+                onChange={e => handleAdminCodeChange(e.target.value)}
+                onBlur={handleAdminCodeBlur}
+                placeholder="0000"
+              />
+              {adminCodeError && (
+                <p className="text-[9px] text-red-400/80 mt-1">{adminCodeError}</p>
+              )}
+              {!settings.adminAuthorizationCode && (
+                <p className="text-[9px] text-white/25 mt-1">
+                  Leave empty to disable voice shutdown. The End button still works.
+                </p>
+              )}
             </div>
           </Section>
 

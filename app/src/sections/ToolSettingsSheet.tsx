@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Wrench, RotateCcw } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Wrench, RotateCcw, ChevronDown } from 'lucide-react'
 import {
   Sheet,
   SheetContent,
@@ -11,10 +11,13 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import {
   getToolsHealth,
+  getToolCatalog,
   executeTool,
   type ToolsHealth,
+  type ToolCatalogEntry,
   type ToolExecuteResult,
 } from '@/services/tools'
 import {
@@ -64,11 +67,14 @@ const LIVE_CATEGORIES: { key: ToolCategory; label: string }[] = [
   { key: 'terminal', label: 'Terminal (approval-gated)' },
   { key: 'browser', label: 'Browser (search + fetch, approval-gated)' },
   { key: 'mcp', label: 'MCP (external servers, approval-gated)' },
+  { key: 'skill', label: 'Skills (composite multi-step tools)' },
 ]
 
 export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSheetProps) {
   const [settings, update] = useToolSettings()
   const [health, setHealth] = useState<ToolsHealth | null>(null)
+  const [catalog, setCatalog] = useState<ToolCatalogEntry[]>([])
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [debugTool, setDebugTool] = useState('git.status')
   const [debugResult, setDebugResult] = useState<ToolExecuteResult | null>(null)
   const [debugLoading, setDebugLoading] = useState(false)
@@ -91,6 +97,28 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
       clearInterval(interval)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    // Always request the full catalog (server-side toolsEnabled=true) regardless
+    // of the local "Enable tools" toggle — this list is "what's available", not
+    // "what's currently active".
+    void getToolCatalog(true).then(tools => {
+      if (!cancelled) setCatalog(tools)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  const toolsByCategory = useMemo(() => {
+    const grouped: Record<string, ToolCatalogEntry[]> = {}
+    for (const tool of catalog) {
+      ;(grouped[tool.category] ??= []).push(tool)
+    }
+    return grouped
+  }, [catalog])
 
   const runtimeDown = health === null
 
@@ -140,20 +168,66 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
           </Section>
 
           <Section title="Categories">
-            {LIVE_CATEGORIES.map(({ key, label }) => (
-              <div key={key} className="flex items-center justify-between gap-3">
-                <Label className="text-white/70">
-                  {label}
-                  {health?.categories?.[key] != null && (
-                    <span className="ml-2 text-white/30">{health.categories[key]}</span>
-                  )}
-                </Label>
-                <Switch
-                  checked={settings.categories[key]}
-                  onCheckedChange={v => setCategory(key, v)}
-                />
-              </div>
-            ))}
+            {LIVE_CATEGORIES.map(({ key, label }) => {
+              const tools = toolsByCategory[key] ?? []
+              const isOpen = expanded[key] ?? false
+              return (
+                <Collapsible key={key} open={isOpen} onOpenChange={v => setExpanded(prev => ({ ...prev, [key]: v }))}>
+                  <div className="flex items-center justify-between gap-3">
+                    <CollapsibleTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-1.5 text-left text-white/70 hover:text-white/90"
+                      >
+                        <ChevronDown
+                          size={12}
+                          className={`text-white/30 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        />
+                        <span>
+                          {label}
+                          <span className="ml-2 text-white/30">
+                            {tools.length || health?.categories?.[key] || 0}
+                          </span>
+                        </span>
+                      </button>
+                    </CollapsibleTrigger>
+                    <Switch
+                      checked={settings.categories[key]}
+                      onCheckedChange={v => setCategory(key, v)}
+                    />
+                  </div>
+                  <CollapsibleContent>
+                    <div className="mt-2 mb-1 ml-[18px] space-y-2 border-l border-white/10 pl-3">
+                      {tools.length === 0 && (
+                        <p className="text-[9px] text-white/25">
+                          {runtimeDown ? 'Runtime offline — catalog unavailable.' : 'No tools registered in this category.'}
+                        </p>
+                      )}
+                      {tools.map(t => (
+                        <div key={t.name} className="text-[10px]">
+                          <div className="flex items-center gap-1.5 font-mono text-white/70">
+                            {t.name}
+                            <span
+                              className={`rounded px-1 py-px text-[8px] uppercase tracking-wide ${
+                                t.permission === 'ask'
+                                  ? 'bg-amber-500/15 text-amber-300/80'
+                                  : 'bg-white/5 text-white/30'
+                              }`}
+                            >
+                              {t.permission}
+                            </span>
+                            {t.latencyClass === 'slow' && (
+                              <span className="text-white/20 text-[8px]">slow</span>
+                            )}
+                          </div>
+                          <p className="text-white/35 leading-snug">{t.description}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )
+            })}
           </Section>
 
           <Section title="Permission posture">
@@ -264,6 +338,15 @@ export default function ToolSettingsSheet({ open, onOpenChange }: ToolSettingsSh
           <p className="text-[9px] text-white/20">
             Default: tools off. {getDefaultToolSettings().defaultPermission} permission posture.
             Runtime: npm run runtime:dev (port 8000).
+          </p>
+          <p className="text-[9px] text-white/20">
+            New tools aren't added from this UI — register a{' '}
+            <code className="font-mono text-white/30">ToolDefinition</code> in{' '}
+            <code className="font-mono text-white/30">runtime/tools/registry.py</code> (handler in{' '}
+            <code className="font-mono text-white/30">runtime/tools/handlers/</code>), then add a
+            keyword hint in <code className="font-mono text-white/30">runtime/tools/router.py</code>{' '}
+            so voice/chat requests actually route to it. It shows up here automatically once
+            registered.
           </p>
         </div>
       </SheetContent>

@@ -134,6 +134,54 @@ class MaintenanceResponse(BaseModel):
     pruned_tool_runs: int = 0
 
 
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    path: str
+    kind: str  # "note" | "chunk"
+    folder: str
+    chunkIndex: int | None = None
+    touchedAt: str
+    linkDegree: int = 0
+
+
+class GraphLink(BaseModel):
+    source: str
+    target: str
+    kind: str  # "wikilink" | "folder"
+
+
+class GraphStats(BaseModel):
+    nodes: int = 0
+    links: int = 0
+    notes: int = 0
+    chunks: int = 0
+
+
+class MemoryGraphResponse(BaseModel):
+    stats: GraphStats
+    truncated: bool = False
+    nodes: list[GraphNode] = []
+    links: list[GraphLink] = []
+
+
+class VaultLink(BaseModel):
+    label: str
+    path: str | None = None
+    resolved: bool = False
+
+
+class VaultNoteResponse(BaseModel):
+    path: str
+    title: str
+    body: str
+    frontmatter: dict = {}
+    outboundLinks: list[VaultLink] = []
+    touchedAt: str
+    embedded: bool = False
+    truncated: bool = False
+
+
 class StoreRequest(BaseModel):
     sessionId: str
     turn: Turn

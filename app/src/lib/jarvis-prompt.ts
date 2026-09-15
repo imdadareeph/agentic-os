@@ -1,4 +1,5 @@
 import type { ConversationTurn } from '@/hooks/useRealtimeConversation'
+import { buildTimeContextBlock } from '@/lib/time-greeting'
 import { getActiveProviderConfig } from '@/stores/ai-settings-store'
 import type { JarvisSettings } from '@/stores/jarvis-settings-store'
 import type { VitalsResponse } from '@/types/vitals'
@@ -45,6 +46,8 @@ export function buildSystemPrompt(
 
   if (providerInstructions) blocks.push(providerInstructions)
   if (jarvisInstructions) blocks.push(jarvisInstructions)
+
+  blocks.push(buildTimeContextBlock())
 
   if (settings.shortAnswers) {
     blocks.push(

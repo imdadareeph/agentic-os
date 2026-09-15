@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getJarvisSettings } from '@/stores/jarvis-settings-store'
 
-export const MEMORY_SETTINGS_SCHEMA_VERSION = 1
+export const MEMORY_SETTINGS_SCHEMA_VERSION = 3
 const STORAGE_KEY = 'agentic-os-memory-settings'
 
 export type EmbeddingProvider = 'ollama' | 'openai'
@@ -11,6 +11,10 @@ export interface MemorySettings {
 
   // User level — master
   memoryEnabled: boolean
+  /** Skips semantic retrieval + heartbeat on every turn — the two per-turn
+   * network calls memory can add to voice latency. Conversation/episodic/
+   * procedural logging (all fire-and-forget) are unaffected. */
+  fastMode: boolean
 
   // User level — layers
   conversationMemoryEnabled: boolean
@@ -42,6 +46,24 @@ export interface MemorySettings {
   autoSyncEnabled: boolean
   syncIntervalMinutes: number
 
+  // User level — Memory Budget (resource ceilings for retrieval + idle background work)
+  /** In-process working-memory soft cap (MB). Advisory ceiling for the runtime. */
+  workingMemoryMb: number
+  /** Total token budget injected into the prompt per turn (context_builder truncates to fit). */
+  sessionContextTokens: number
+  /** Primary retrieve cap — hard limit on memories injected per turn. Caps semanticTopK. */
+  maxRetrievedMemories: number
+  /** Concurrent idle-worker jobs (embeds/reflection). */
+  maxParallelMemoryJobs: number
+  /** Advisory CPU ceiling for background memory work (%). Throttles the idle worker. */
+  maxBackgroundCpuPercent: number
+  /** Advisory GPU ceiling for background memory work (%). */
+  maxBackgroundGpuPercent: number
+  /** Max wall-clock spent on reflection per day (minutes). */
+  dailyReflectionMinutes: number
+  /** Hard cap on embeddings generated per day (protects CPU/battery). */
+  embeddingBudgetPerDay: number
+
   // Session level — scoped to one conversation; NEW SESSION resets both
   sessionMemoryEnabled: boolean
   incognitoMode: boolean
@@ -51,10 +73,11 @@ export function getDefaultMemorySettings(): MemorySettings {
   return {
     schemaVersion: MEMORY_SETTINGS_SCHEMA_VERSION,
     memoryEnabled: true,
+    fastMode: false,
     conversationMemoryEnabled: true,
     semanticMemoryEnabled: false,
     episodicMemoryEnabled: false,
-    proceduralMemoryEnabled: false,
+    proceduralMemoryEnabled: true,
     conversationTurnLimit: 4,
     conversationRetentionDays: 30,
     semanticTopK: 3,
@@ -68,6 +91,14 @@ export function getDefaultMemorySettings(): MemorySettings {
     proceduralRetentionDays: 90,
     autoSyncEnabled: true,
     syncIntervalMinutes: 15,
+    workingMemoryMb: 512,
+    sessionContextTokens: 8192,
+    maxRetrievedMemories: 25,
+    maxParallelMemoryJobs: 3,
+    maxBackgroundCpuPercent: 20,
+    maxBackgroundGpuPercent: 30,
+    dailyReflectionMinutes: 15,
+    embeddingBudgetPerDay: 500,
     sessionMemoryEnabled: true,
     incognitoMode: false,
   }
@@ -99,10 +130,25 @@ function migrate(stored: Partial<MemorySettings>): MemorySettings {
       migrateConversationMemoryFromJarvisSettings() ?? defaults.conversationTurnLimit
   }
 
+  // v2 adds the Memory Budget block — the { ...defaults, ...stored } merge below
+  // back-fills every new field (workingMemoryMb, sessionContextTokens, …) for
+  // settings saved under v1.
+
+  // v3: proceduralMemoryEnabled went from an inert UI-only flag (backend always
+  // logged tool_runs regardless of its value) to an actually-enforced gate. A
+  // stored `false` from before v3 would now silently stop procedural logging
+  // for users who never touched this toggle — force it back to true once, on
+  // upgrade only; a deliberate off after v3 is respected normally.
+  let proceduralMemoryEnabled = stored.proceduralMemoryEnabled
+  if (version < 3) {
+    proceduralMemoryEnabled = defaults.proceduralMemoryEnabled
+  }
+
   return {
     ...defaults,
     ...stored,
     conversationTurnLimit: conversationTurnLimit ?? defaults.conversationTurnLimit,
+    proceduralMemoryEnabled: proceduralMemoryEnabled ?? defaults.proceduralMemoryEnabled,
     schemaVersion: MEMORY_SETTINGS_SCHEMA_VERSION,
   }
 }

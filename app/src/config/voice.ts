@@ -24,7 +24,10 @@ function envNumber(name: string, fallback: number): number {
 
 export const VOICE_ENV_DEFAULTS = {
   voiceMode: envString('VITE_VOICE_MODE', 'conversation') as VoiceMode,
-  turnSilenceMs: envNumber('VITE_TURN_SILENCE_MS', 1200),
+  // 900ms: the floor of "user paused to think" vs "user finished the turn".
+  // Every ms here is raw listening lag before JARVIS even starts processing;
+  // 1200ms read as "slow to listen". Adjustable per-user in Voice Settings.
+  turnSilenceMs: envNumber('VITE_TURN_SILENCE_MS', 900),
   whisperRefine: envFlag('VITE_WHISPER_REFINE', false),
   minTurnChars: envNumber('VITE_MIN_TURN_CHARS', 3),
   sttFinalProvider: envString('VITE_STT_FINAL_PROVIDER', 'whisper') as SttFinalProvider,

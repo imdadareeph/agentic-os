@@ -3,9 +3,10 @@ import {
   AI_PROVIDER_REGISTRY,
   type AiProviderId,
 } from '@/config/ai-providers'
+import { isOllamaEmbedModel } from '@/services/llm/ollama'
 import { loadJarvisSettings } from '@/stores/jarvis-settings-store'
 
-export const AI_SETTINGS_SCHEMA_VERSION = 1
+export const AI_SETTINGS_SCHEMA_VERSION = 3
 const STORAGE_KEY = 'agentic-os-ai-settings'
 
 export interface AiProviderConfig {
@@ -21,6 +22,12 @@ export interface AiSettings {
   schemaVersion: number
   activeProvider: AiProviderId
   providers: Record<AiProviderId, AiProviderConfig>
+  /** 3–4 digit code for voice shutdown/terminate; empty disables voice shutdown. */
+  adminAuthorizationCode: string
+}
+
+export function isValidAdminCode(code: string): boolean {
+  return /^\d{3,4}$/.test(code)
 }
 
 function defaultProviderConfig(id: AiProviderId, modelOverride = ''): AiProviderConfig {
@@ -44,11 +51,13 @@ export function getDefaultAiSettings(): AiSettings {
       anthropic: defaultProviderConfig('anthropic'),
       gemini: defaultProviderConfig('gemini'),
     },
+    adminAuthorizationCode: '',
   }
 }
 
 function migrate(stored: Partial<AiSettings>): AiSettings {
   const defaults = getDefaultAiSettings()
+  const version = stored.schemaVersion ?? 0
   const merged: AiSettings = {
     ...defaults,
     ...stored,
@@ -67,11 +76,32 @@ function migrate(stored: Partial<AiSettings>): AiSettings {
     }
   }
 
-  if ((stored.schemaVersion ?? 0) < 1) {
+  if (version < 1) {
     const jarvis = loadJarvisSettings()
     if (jarvis.ollamaModel) {
       merged.providers.ollama.model = jarvis.ollamaModel
     }
+  }
+
+  // Embed-only models (e.g. nomic-embed-text) must never be the chat model.
+  if (isOllamaEmbedModel(merged.providers.ollama.model)) {
+    merged.providers.ollama.model = defaults.providers.ollama.model
+  }
+
+  // v2: default chat model when unset (was empty → auto-picked first Ollama tag, often embed).
+  if (version < 2 && !merged.providers.ollama.model.trim()) {
+    merged.providers.ollama.model = defaults.providers.ollama.model
+  }
+
+  if (version < 3) {
+    merged.adminAuthorizationCode = stored.adminAuthorizationCode ?? ''
+  }
+
+  // Sanitize only — allow partial digits while the user is typing in settings.
+  if (merged.adminAuthorizationCode) {
+    merged.adminAuthorizationCode = merged.adminAuthorizationCode
+      .replace(/\D/g, '')
+      .slice(0, 4)
   }
 
   return merged

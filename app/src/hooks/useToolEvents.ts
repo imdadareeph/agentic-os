@@ -6,20 +6,29 @@ export interface ToolEventsState {
   activeTools: string[]
   /** Last failure message, e.g. "docker.ps failed: <error>". Null once cleared. */
   lastError: string | null
+  /**
+   * The most recent event, as a fresh reference each time so consumers can key
+   * a per-event effect off it (the Notification Agent does this to dispatch one
+   * toast per event). Null until the first event arrives.
+   */
+  lastEvent: ToolEvent | null
 }
 
 /**
- * Subscribes to runtime tool-execution events and exposes minimal Notification
- * state for a consumer to render (T3 §6, stub scope). Self-contained and unwired
- * — mount it wherever the Notification area lives. Never throws; a dead runtime
- * simply yields no events.
+ * Subscribes to the runtime tool-execution stream and exposes lifecycle state.
+ * Wired into RightPanel (progress in the Command Deck header) and, via
+ * useNotifications, into the Notification Agent (toasts for failures and task
+ * completion). Single SSE subscription shared by both. Never throws; a dead
+ * runtime simply yields no events.
  */
 export function useToolEvents(): ToolEventsState {
   const [activeTools, setActiveTools] = useState<string[]>([])
   const [lastError, setLastError] = useState<string | null>(null)
+  const [lastEvent, setLastEvent] = useState<ToolEvent | null>(null)
 
   useEffect(() => {
     const handle = (e: ToolEvent) => {
+      setLastEvent(e)
       if (e.type === 'TOOL_STARTED') {
         setActiveTools((prev) => (prev.includes(e.tool) ? prev : [...prev, e.tool]))
         return
@@ -33,5 +42,5 @@ export function useToolEvents(): ToolEventsState {
     return subscribeToolEvents(handle)
   }, [])
 
-  return { activeTools, lastError }
+  return { activeTools, lastError, lastEvent }
 }

@@ -37,6 +37,7 @@ async def execute(
     ctx: ToolContext,
     posture: str = "balanced",
     force: bool = False,
+    procedural_enabled: bool = True,
 ) -> ToolResult:
     tool = registry.get_tool(tool_name)
     if tool is None or not tool.enabled:
@@ -74,16 +75,17 @@ async def execute(
                     "TOOL_FAILED", tool_name, ctx.session_id, error=str(data.get("error"))
                 )
             )
-        await procedural.record_tool_run(
-            ctx.db,
-            tool_name=tool_name,
-            success=success,
-            session_id=ctx.session_id,
-            agent_id=ctx.agent_id,
-            input_json=json.dumps(args),
-            output_json=json.dumps(data),
-            duration_ms=duration_ms,
-        )
+        if procedural_enabled:
+            await procedural.record_tool_run(
+                ctx.db,
+                tool_name=tool_name,
+                success=success,
+                session_id=ctx.session_id,
+                agent_id=ctx.agent_id,
+                input_json=json.dumps(args),
+                output_json=json.dumps(data),
+                duration_ms=duration_ms,
+            )
         if not success:
             return ToolResult(ok=False, error=str(data.get("error")), data=data)
         return ToolResult(ok=True, data=data)
@@ -92,14 +94,15 @@ async def execute(
         events.publish(
             events.make_event("TOOL_FAILED", tool_name, ctx.session_id, error=str(err))
         )
-        await procedural.record_tool_run(
-            ctx.db,
-            tool_name=tool_name,
-            success=False,
-            session_id=ctx.session_id,
-            agent_id=ctx.agent_id,
-            input_json=json.dumps(args),
-            output_json=json.dumps({"error": str(err)}),
-            duration_ms=duration_ms,
-        )
+        if procedural_enabled:
+            await procedural.record_tool_run(
+                ctx.db,
+                tool_name=tool_name,
+                success=False,
+                session_id=ctx.session_id,
+                agent_id=ctx.agent_id,
+                input_json=json.dumps(args),
+                output_json=json.dumps({"error": str(err)}),
+                duration_ms=duration_ms,
+            )
         return ToolResult(ok=False, error=str(err))

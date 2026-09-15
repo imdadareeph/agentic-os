@@ -1,5 +1,10 @@
+import { buildSessionGreeting } from '@/lib/time-greeting'
+
 export const JARVIS_SAMPLE_PATH = '/voices/jarvis-voice.wav'
-export const JARVIS_TEST_PHRASE = 'Good evening. JARVIS online.'
+
+export function getJarvisTestPhrase(): string {
+  return buildSessionGreeting()
+}
 
 let sampleAudio: HTMLAudioElement | null = null
 

@@ -28,7 +28,7 @@ import {
 } from '@/stores/voice-settings-store'
 import { listBrowserVoices } from '@/services/tts'
 import { speakText } from '@/services/voice'
-import { playJarvisSample, JARVIS_TEST_PHRASE } from '@/lib/jarvis-voice'
+import { playJarvisSample, getJarvisTestPhrase } from '@/lib/jarvis-voice'
 import { previewJarvisAmbient, stopJarvisAmbientPreview } from '@/lib/jarvis-ambient'
 import { isSpeechRecognitionSupported } from '@/services/speech-recognition'
 
@@ -280,7 +280,7 @@ export default function VoiceSettingsSheet({ open, onOpenChange }: VoiceSettings
                 className="border-white/10 text-white/70"
                 onClick={() => {
                   setTestStatus(null)
-                  void speakText(JARVIS_TEST_PHRASE, settings.voiceboxProfile).catch(e =>
+                  void speakText(getJarvisTestPhrase(), settings.voiceboxProfile).catch(e =>
                     setTestStatus(e instanceof Error ? e.message : 'TTS failed')
                   )
                 }}

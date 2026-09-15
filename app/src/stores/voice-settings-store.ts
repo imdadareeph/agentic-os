@@ -6,7 +6,7 @@ import {
   type VoiceMode,
 } from '@/config/voice'
 
-export const VOICE_SETTINGS_SCHEMA_VERSION = 3
+export const VOICE_SETTINGS_SCHEMA_VERSION = 4
 const STORAGE_KEY = 'agentic-os-voice-settings'
 
 export interface VoiceSettings {
@@ -58,6 +58,13 @@ function migrate(stored: Partial<VoiceSettings>): VoiceSettings {
   if ((stored.schemaVersion ?? 0) < 3) {
     merged.voiceboxEnabled = defaults.voiceboxEnabled
     merged.voiceboxSttFallback = defaults.voiceboxSttFallback
+  }
+
+  // v4: default turnSilenceMs dropped 1200 → 900 (listening-lag fix). Only
+  // migrate values still sitting on the OLD default — a user who deliberately
+  // set a custom value keeps it.
+  if ((stored.schemaVersion ?? 0) < 4 && stored.turnSilenceMs === 1200) {
+    merged.turnSilenceMs = defaults.turnSilenceMs
   }
 
   return merged

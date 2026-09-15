@@ -7,7 +7,17 @@
  * the voice flow.
  */
 
+import { logActivity } from '@/services/activity-log'
+import { fetchWithTimeout } from '@/lib/fetch'
+
 const RUNTIME_BASE = '/runtime'
+
+// Voice latency is sacred: retrieve sits ON the hot path (awaited before the
+// LLM call), so a slow/hung runtime must degrade to empty fast, not stall the
+// turn — raw fetch has no timeout and hangs as long as the socket does.
+const RETRIEVE_TIMEOUT_MS = 1500
+// Off-path (fire-and-forget) calls still get a bound so they can't pile up.
+const DEFAULT_TIMEOUT_MS = 5000
 
 export interface MemoryTurn {
   id: string
@@ -63,13 +73,21 @@ const EMPTY_RETRIEVE: RetrieveResult = {
   contextBlock: '',
 }
 
-async function post(path: string, body: unknown): Promise<Response | null> {
+async function post(
+  path: string,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Response | null> {
   try {
-    return await fetch(`${RUNTIME_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    return await fetchWithTimeout(
+      `${RUNTIME_BASE}${path}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      timeoutMs
+    )
   } catch {
     return null
   }
@@ -141,7 +159,8 @@ export async function storeTurn(
   turn: MemoryTurn,
   agentId = 'jarvis'
 ): Promise<void> {
-  await post('/api/memory/store', { sessionId, turn, agentId })
+  const res = await post('/api/memory/store', { sessionId, turn, agentId })
+  logActivity('memory', 'Store turn', res?.ok ? 'ok' : 'error')
 }
 
 /** Fetch memory for a session. Degrades to an empty envelope on any failure. */
@@ -151,7 +170,10 @@ export async function retrieveMemory(
   options: RetrieveOptions = {},
   agentId = 'jarvis'
 ): Promise<RetrieveResult> {
-  const res = await post('/api/memory/retrieve', {
+  const startedAt = performance.now()
+  const res = await post(
+    '/api/memory/retrieve',
+    {
     sessionId,
     userMessage,
     agentId,
@@ -160,11 +182,25 @@ export async function retrieveMemory(
     semanticMinScore: options.semanticMinScore ?? 0.65,
     maxRetrievedMemories: options.maxRetrievedMemories ?? 25,
     sessionContextTokens: options.sessionContextTokens ?? 8192,
-  })
-  if (!res || !res.ok) return EMPTY_RETRIEVE
+    },
+    RETRIEVE_TIMEOUT_MS
+  )
+  const ms = Math.round(performance.now() - startedAt)
+  if (!res || !res.ok) {
+    logActivity('memory', 'Retrieve memory', 'error', `${ms}ms`)
+    return EMPTY_RETRIEVE
+  }
   try {
-    return (await res.json()) as RetrieveResult
+    const result = (await res.json()) as RetrieveResult
+    logActivity(
+      'memory',
+      'Retrieve memory',
+      'ok',
+      `${ms}ms · ${result.conversation.length} conv · ${result.semantic.length} semantic`
+    )
+    return result
   } catch {
+    logActivity('memory', 'Retrieve memory', 'error')
     return EMPTY_RETRIEVE
   }
 }
@@ -197,11 +233,18 @@ export interface SyncResult {
 
 /** Trigger a vault → Chroma reconcile. Null on failure. */
 export async function syncMemory(): Promise<SyncResult | null> {
-  const res = await post('/api/memory/sync', {})
-  if (!res || !res.ok) return null
+  // Full reconcile re-embeds every changed file — minutes on a big vault.
+  const res = await post('/api/memory/sync', {}, 300_000)
+  if (!res || !res.ok) {
+    logActivity('obsidian', 'Vault sync', 'error')
+    return null
+  }
   try {
-    return (await res.json()) as SyncResult
+    const result = (await res.json()) as SyncResult
+    logActivity('obsidian', 'Vault sync', 'ok', `${result.embedded} embedded · ${result.deleted} deleted`)
+    return result
   } catch {
+    logActivity('obsidian', 'Vault sync', 'error')
     return null
   }
 }
@@ -210,23 +253,28 @@ export interface EpisodicWrite {
   title: string
   body: string
   sessionId?: string
+  agentId?: string
   tags?: string[]
   sources?: string[]
 }
 
 /**
  * Write an episodic note to the vault (M3). Fire-and-forget safe — a failed
- * write must never affect the voice flow.
+ * write must never affect the voice flow. Returns whether it actually
+ * succeeded, for callers (e.g. explicit user-initiated saves) that need to
+ * know before proceeding — fire-and-forget callers can just `void` it.
  */
-export async function writeEpisodic(note: EpisodicWrite): Promise<void> {
-  await post('/api/memory/episodic', {
+export async function writeEpisodic(note: EpisodicWrite): Promise<boolean> {
+  const res = await post('/api/memory/episodic', {
     title: note.title,
     body: note.body,
     sessionId: note.sessionId ?? '',
-    agentId: 'jarvis',
+    agentId: note.agentId ?? 'jarvis',
     tags: note.tags ?? [],
     sources: note.sources ?? [],
   })
+  logActivity('obsidian', `Vault note: ${note.title}`, res?.ok ? 'ok' : 'error')
+  return res?.ok ?? false
 }
 
 export interface MemoryBudget {
@@ -251,4 +299,103 @@ export function looksResearchy(text: string): boolean {
   return /\b(how|why|what|set ?up|configure|install|research|decide|decision|explain|document)\b/i.test(
     text
   )
+}
+
+// --- Memory Galaxy (Phase MV) ------------------------------------------------
+// On-demand only — fetched from MemoryGalaxyPage (`/memory`), never during a
+// voice conversation. Same graceful-degradation contract as the rest of this
+// file: a dead runtime yields an empty graph, never a throw.
+
+export interface GraphNode {
+  id: string
+  label: string
+  path: string
+  kind: 'note' | 'chunk'
+  folder: string
+  chunkIndex: number | null
+  touchedAt: string
+  linkDegree: number
+}
+
+export interface GraphLink {
+  source: string
+  target: string
+  kind: 'wikilink' | 'folder'
+}
+
+export interface GraphStats {
+  nodes: number
+  links: number
+  notes: number
+  chunks: number
+}
+
+export interface MemoryGraph {
+  stats: GraphStats
+  truncated: boolean
+  nodes: GraphNode[]
+  links: GraphLink[]
+}
+
+const EMPTY_GRAPH: MemoryGraph = {
+  stats: { nodes: 0, links: 0, notes: 0, chunks: 0 },
+  truncated: false,
+  nodes: [],
+  links: [],
+}
+
+export interface GraphOptions {
+  granularity?: 'note' | 'chunk'
+  maxNodes?: number
+  maxLinks?: number
+}
+
+export async function fetchMemoryGraph(options: GraphOptions = {}): Promise<MemoryGraph> {
+  try {
+    const params = new URLSearchParams({
+      granularity: options.granularity ?? 'note',
+      maxNodes: String(options.maxNodes ?? 500),
+      maxLinks: String(options.maxLinks ?? 2000),
+    })
+    const res = await fetch(`${RUNTIME_BASE}/api/memory/graph?${params}`)
+    if (!res.ok) return EMPTY_GRAPH
+    return (await res.json()) as MemoryGraph
+  } catch {
+    return EMPTY_GRAPH
+  }
+}
+
+// --- Vault note preview (Phase MV.2) -----------------------------------------
+// On-demand only — fetched when a graph star is selected, never during voice.
+
+export interface VaultLink {
+  label: string
+  path: string | null
+  resolved: boolean
+}
+
+export interface VaultNote {
+  path: string
+  title: string
+  body: string
+  frontmatter: Record<string, unknown>
+  outboundLinks: VaultLink[]
+  touchedAt: string
+  embedded: boolean
+  truncated: boolean
+}
+
+export async function fetchVaultNote(path: string): Promise<VaultNote | null> {
+  try {
+    const params = new URLSearchParams({ path })
+    const res = await fetchWithTimeout(
+      `${RUNTIME_BASE}/api/memory/vault/note?${params}`,
+      {},
+      5000
+    )
+    if (!res.ok) return null
+    return (await res.json()) as VaultNote
+  } catch {
+    return null
+  }
 }
