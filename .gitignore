@@ -12,11 +12,41 @@ app/.vitals-cache.json
 client_secret*.json
 .secrets/
 
+# App — local runtime (never commit)
+app/logs/
+app/node_modules/
+app/.pytest_cache/
+app/dist/
+app/.env
+
 # Logs
 logs/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# Python test cache & coverage
+.pytest_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime DB / vector store (root-level)
+*.db
+chroma/
+
+# Agent / hook session data (not source)
+.claude/data/sessions/
+app/.claude/
+
+# Graphify generated output
+graphify-out/
+
+# Obsidian — local editor config + plugins (runtime vault is ~/jarvis/vault/)
+.obsidian/
 
 # OS & editors
 .DS_Store
@@ -34,6 +64,9 @@ pnpm-debug.log*
 .cursor/aidocs/do-not-commit/
 .cursor/
 .agents/
+
+# Local reference / vendored code — never commit (certs, experiments, Friday/JARVIS prototypes)
+extras/
 
 # Local observability stack (separate repo)
 observability/
