@@ -153,6 +153,18 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
                 onCheckedChange={v => set('memoryEnabled', v)}
               />
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-white/70">Fast mode</Label>
+              <Switch
+                checked={settings.fastMode}
+                onCheckedChange={v => set('fastMode', v)}
+              />
+            </div>
+            <p className="text-[9px] text-white/30">
+              Skips semantic retrieval + heartbeat on every turn — the two per-turn network calls
+              memory can add to voice latency. Check Live Activity (left panel) for per-turn
+              timings (Retrieve/Think/Speak) to see where time is actually going.
+            </p>
             <div className="flex items-center gap-3 flex-wrap" role="list" aria-label="Memory layer status">
               <HealthPill label="SQLite" state={health?.sqlite ?? null} />
               <span aria-hidden="true" className="text-white/15">·</span>
@@ -526,11 +538,14 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
                 onClick={() => {
                   setObsidianSaving(true)
                   void saveObsidianConfig(obsidianBaseUrl, obsidianKeyInput.trim())
-                    .then(cfg => {
+                    .then(async cfg => {
                       if (cfg) {
                         setObsidianCfg(cfg)
                         setObsidianKeyInput('')
                       }
+                      // Re-check health immediately — otherwise the pill sits on
+                      // its stale (pre-save) value for up to the 30s poll interval.
+                      setHealth(await getMemoryHealth())
                     })
                     .finally(() => setObsidianSaving(false))
                 }}
@@ -540,11 +555,19 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
             </div>
           </Section>
 
-          <Section title="Procedural" phase="M4">
+          <Section title="Procedural">
             <div className="flex items-center justify-between gap-3">
               <Label className="text-white/70">Enable layer</Label>
-              <Switch checked={settings.proceduralMemoryEnabled} disabled />
+              <Switch
+                checked={settings.proceduralMemoryEnabled}
+                onCheckedChange={v => set('proceduralMemoryEnabled', v)}
+              />
             </div>
+            <p className="text-[9px] text-white/30">
+              Logs every tool call (name, success, duration) to `tool_runs` for the voice tool
+              loop. Retention: {settings.proceduralRetentionDays} days (daily sweep). Off = tool
+              calls still run, just aren&apos;t logged.
+            </p>
           </Section>
 
           <Button

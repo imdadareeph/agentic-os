@@ -8,7 +8,8 @@ from tools.schemas import ToolDefinition
 
 # execute_tool triggers — TOOLS.md §11 scope note.
 _EXECUTE_WORDS = re.compile(
-    r"\b(run|execute|pull|fetch|check|metrics|status|search|look ?up|read|list|show|open|files?|folder|directory|git|docker|commits?|containers?)\b",
+    r"\b(run|execute|pull|fetch|check|metrics|status|search|look ?up|read|list|show|open|files?|folder|directory|git|docker|commits?|containers?"
+    r"|plan|research|report|briefing|save|write|remember|delete|commit|start|stop|launch)\b",
     re.IGNORECASE,
 )
 # Never enter the tool loop for these.
@@ -31,6 +32,16 @@ _TOOL_KEYWORDS: dict[str, list[str]] = {
     "git.status": ["git status", "working tree", "uncommitted", "what changed"],
     "git.log": ["git log", "recent commits", "commit history", "last commits"],
     "docker.ps": ["docker", "containers", "running containers", "docker ps"],
+    "terminal.run": ["terminal", "shell", "run command", "run a command", "execute command", "run script"],
+    "git.commit": ["commit", "git commit", "save changes to git"],
+    "docker.run": ["start container", "docker run", "launch container"],
+    "docker.stop": ["stop container", "docker stop", "kill container"],
+    "filesystem.write": ["write file", "save file", "create file", "write to file"],
+    "filesystem.delete": ["delete file", "remove file"],
+    "memory.episodic.write": ["save note", "write note", "remember this", "save to vault"],
+    "skill.plan_today": ["plan today", "plan for today", "today's plan", "what's on today"],
+    "skill.am_report": ["morning report", "am report", "morning briefing"],
+    "agent.research.run": ["research", "look into", "find out about", "dig into"],
 }
 
 
@@ -55,10 +66,12 @@ def plan(user_message: str, catalog: list[ToolDefinition]) -> dict:
     )
     candidates = [name for name in ranked if _score(name, msg) > 0][:_MAX_CANDIDATES]
     if not candidates:
-        # Execute-intent word matched but no specific tool hint — offer the full
-        # fast catalog so the LLM can still decide (better recall than a miss).
-        candidates = [t.name for t in catalog if t.enabled and t.latency_class == "fast"][
-            :_MAX_CANDIDATES
-        ]
+        # Execute-intent word matched but no tool keyword scored. Offering the
+        # full fast catalog here (old behavior) made near-every chat message a
+        # tool-loop turn on Ollama — multi-turn tool calls on small local models
+        # cost seconds, then often degraded to a SECOND full LLM call. A missed
+        # tool costs a keyword hint in _TOOL_KEYWORDS; a false positive costs
+        # every user seconds of voice latency. Skip.
+        return {"useTools": False, "candidates": [], "intent": "chat"}
 
     return {"useTools": True, "candidates": candidates, "intent": "execute_tool"}

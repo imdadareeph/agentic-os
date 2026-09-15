@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
 import { isAbortError } from '@/lib/fetch'
+import { buildSessionGreeting } from '@/lib/time-greeting'
+import {
+  extractAdminCode,
+  isShutdownIntent,
+  matchesAdminCode,
+} from '@/lib/admin-auth'
 import { thinkWithTools } from '@/services/jarvis'
 import { cancelSpeech, speakText, transcribeAudio } from '@/services/voice'
 import { peekWhisperStatus } from '@/services/whisper'
+import { logActivity } from '@/services/activity-log'
 import {
   startContinuousRecognition,
   isSpeechRecognitionSupported,
@@ -23,6 +30,10 @@ import {
   isMemoryPersistenceEnabled,
   resetSessionMemoryFlags,
 } from '@/stores/memory-settings-store'
+import {
+  getAiSettings,
+  isValidAdminCode,
+} from '@/stores/ai-settings-store'
 import type { VitalsResponse } from '@/types/vitals'
 
 export type ConversationPhase =
@@ -31,6 +42,7 @@ export type ConversationPhase =
   | 'refining'
   | 'thinking'
   | 'speaking'
+  | 'terminating'
   | 'error'
 
 export interface ConversationTurn {
@@ -94,10 +106,34 @@ export function useRealtimeConversation(
   const turnsRef = useRef<ConversationTurn[]>([])
   /** Backend memory session (null = runtime unavailable; memory silently off). */
   const sessionIdRef = useRef<string | null>(null)
+  const adminAuthPendingRef = useRef(false)
+  const confirmShutdownRef = useRef<() => Promise<void>>(async () => {})
 
   useEffect(() => {
     turnsRef.current = turns
   }, [turns])
+
+  // Keep the runtime's activity clock warm for the WHOLE session, not just per
+  // turn. The idle worker starts after 20s of quiet (idle.IDLE_AFTER_S) — a
+  // pause between turns longer than that let it grab Ollama for embeddings
+  // right when the next turn arrived, paying a cold-model / queued-request
+  // penalty on the voice path. 10s beat keeps it standing down.
+  useEffect(() => {
+    if (!conversationActive) return
+    const mem = getMemorySettings()
+    if (!isMemoryPersistenceEnabled() || mem.fastMode) return
+    const beat = () =>
+      void sendHeartbeat({
+        maxParallelMemoryJobs: mem.maxParallelMemoryJobs,
+        embeddingBudgetPerDay: mem.embeddingBudgetPerDay,
+        dailyReflectionMinutes: mem.dailyReflectionMinutes,
+        maxBackgroundCpuPercent: mem.maxBackgroundCpuPercent,
+        maxBackgroundGpuPercent: mem.maxBackgroundGpuPercent,
+      }).catch(() => {})
+    beat()
+    const timer = setInterval(beat, 10_000)
+    return () => clearInterval(timer)
+  }, [conversationActive])
 
   /** Fire-and-forget turn persistence — a failed store must never block speech. */
   const persistTurn = useCallback(
@@ -302,6 +338,81 @@ export function useRealtimeConversation(
       return
     }
 
+    const adminFlow =
+      adminAuthPendingRef.current || isShutdownIntent(trimmed)
+
+    if (adminFlow) {
+      setError(null)
+      processingRef.current = true
+      clearSilenceTimer()
+      stopRecognition()
+      setInterimTranscript('')
+      interimRef.current = ''
+      turnTextRef.current = ''
+      lastInterimRef.current = ''
+
+      const turnId = newTurnId()
+      setTurns(prev => [
+        ...prev,
+        { id: turnId, role: 'user', text: trimmed, timestamp: Date.now() },
+      ])
+      persistTurn(turnId, 'user', trimmed)
+
+      const adminCode = getAiSettings().adminAuthorizationCode
+
+      const speakAdmin = async (message: string, resume = true) => {
+        const assistantId = newTurnId()
+        setTurns(prev => [
+          ...prev,
+          { id: assistantId, role: 'assistant', text: message, timestamp: Date.now() },
+        ])
+        persistTurn(assistantId, 'assistant', message)
+        setPhase('speaking')
+        try {
+          await speakText(message, cfg.voiceboxProfile)
+        } catch (speakErr) {
+          if (!isAbortError(speakErr) && !pausedRef.current) {
+            setError(
+              speakErr instanceof Error
+                ? speakErr.message
+                : 'Speech playback failed — check Voice Settings'
+            )
+          }
+        }
+        if (resume && !pausedRef.current) resumeListening()
+      }
+
+      try {
+        if (adminAuthPendingRef.current) {
+          const extracted = extractAdminCode(trimmed)
+          if (!extracted) {
+            adminAuthPendingRef.current = false
+            await speakAdmin('Authorization code not recognized. Shutdown cancelled.')
+          } else if (matchesAdminCode(trimmed, adminCode)) {
+            await confirmShutdownRef.current()
+          } else {
+            adminAuthPendingRef.current = false
+            await speakAdmin('Authorization code incorrect. Shutdown cancelled.')
+          }
+        } else if (isShutdownIntent(trimmed)) {
+          if (!isValidAdminCode(adminCode)) {
+            adminAuthPendingRef.current = false
+            await speakAdmin(
+              'Admin authorization is not configured. Voice shutdown is disabled. Use the End button to close the session.'
+            )
+          } else {
+            adminAuthPendingRef.current = true
+            await speakAdmin(
+              'Understood. Please say the authorization code to confirm shutdown.'
+            )
+          }
+        }
+      } finally {
+        processingRef.current = false
+      }
+      return
+    }
+
     setError(null)
     processingRef.current = true
     clearSilenceTimer()
@@ -363,7 +474,7 @@ export function useRealtimeConversation(
     // empty on any failure — the runtime enforces its own 300ms timeout.
     let memoryContext: string | null = null
     const mem = getMemorySettings()
-    if (sessionIdRef.current && isMemoryPersistenceEnabled()) {
+    if (sessionIdRef.current && isMemoryPersistenceEnabled() && !mem.fastMode) {
       // Heartbeat: keep the runtime active-clock warm + push the Memory Budget so
       // the idle background worker stands down while we're mid-conversation.
       void sendHeartbeat({
@@ -377,7 +488,8 @@ export function useRealtimeConversation(
     if (
       sessionIdRef.current &&
       isMemoryPersistenceEnabled() &&
-      mem.semanticMemoryEnabled
+      mem.semanticMemoryEnabled &&
+      !mem.fastMode
     ) {
       const result = await retrieveMemory(sessionIdRef.current, finalText, {
         semanticEnabled: true,
@@ -393,6 +505,7 @@ export function useRealtimeConversation(
     try {
       // Tool-aware think: runs the supervised tool loop when tools are enabled
       // and warranted, else a plain LLM turn. Falls back to think() on any issue.
+      const thinkStartedAt = performance.now()
       const reply = await thinkWithTools(
         finalText,
         history,
@@ -401,6 +514,7 @@ export function useRealtimeConversation(
         memoryContext,
         sessionIdRef.current ?? ''
       )
+      logActivity('llm', 'Think', 'ok', `${Math.round(performance.now() - thinkStartedAt)}ms`)
       if (pausedRef.current || controller.signal.aborted) return
 
       const assistantId = newTurnId()
@@ -428,10 +542,13 @@ export function useRealtimeConversation(
         })
       }
       setPhase('speaking')
+      const speakStartedAt = performance.now()
       try {
         await speakText(reply, cfg.voiceboxProfile)
+        logActivity('voice', 'Speak', 'ok', `${Math.round(performance.now() - speakStartedAt)}ms`)
       } catch (speakErr) {
         if (isAbortError(speakErr) || pausedRef.current) return
+        logActivity('voice', 'Speak', 'error', `${Math.round(performance.now() - speakStartedAt)}ms`)
         setError(
           speakErr instanceof Error
             ? speakErr.message
@@ -464,6 +581,7 @@ export function useRealtimeConversation(
     turnTextRef.current = ''
     interimRef.current = ''
     processingRef.current = false
+    adminAuthPendingRef.current = false
     pausedRef.current = false
     setConversationPaused(false)
     activeRef.current = true
@@ -484,8 +602,6 @@ export function useRealtimeConversation(
           .catch(() => {})
       }
 
-      beginRecognition()
-
       const audioCtx = new AudioContext()
       audioCtxRef.current = audioCtx
       await audioCtx.resume()
@@ -495,6 +611,22 @@ export function useRealtimeConversation(
 
       stopMeterRef.current?.()
       stopMeterRef.current = startMicLevelMeter(analyser, setVolume)
+
+      const cfg = getVoiceSettings()
+      const greeting = buildSessionGreeting()
+      setPhase('speaking')
+      try {
+        await speakText(greeting, cfg.voiceboxProfile)
+      } catch (speakErr) {
+        if (!isAbortError(speakErr)) {
+          // Greeting failure must not block the session.
+        }
+      }
+
+      if (!activeRef.current || pausedRef.current) return
+
+      setPhase('listening')
+      beginRecognition()
     } catch (err) {
       activeRef.current = false
       setConversationActive(false)
@@ -528,6 +660,7 @@ export function useRealtimeConversation(
 
   const stopConversation = useCallback(() => {
     interruptActiveWork()
+    adminAuthPendingRef.current = false
     activeRef.current = false
     pausedRef.current = false
     setConversationPaused(false)
@@ -535,6 +668,25 @@ export function useRealtimeConversation(
     cleanupMedia()
     setPhase('idle')
   }, [cleanupMedia, interruptActiveWork])
+
+  confirmShutdownRef.current = async () => {
+    adminAuthPendingRef.current = false
+    setPhase('terminating')
+    const cfg = getVoiceSettings()
+    const message = 'Terminating session.'
+    const assistantId = newTurnId()
+    setTurns(prev => [
+      ...prev,
+      { id: assistantId, role: 'assistant', text: message, timestamp: Date.now() },
+    ])
+    persistTurn(assistantId, 'assistant', message)
+    try {
+      await speakText(message, cfg.voiceboxProfile)
+    } catch {
+      // Best effort before closing the session.
+    }
+    stopConversation()
+  }
 
   const toggleConversation = useCallback(async () => {
     if (conversationActive || conversationPaused) stopConversation()

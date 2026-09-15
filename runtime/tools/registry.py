@@ -5,7 +5,19 @@ Skills/agents/MCP register dynamically in later phases; T0 is core-only.
 
 from __future__ import annotations
 
-from tools.handlers import browser, docker, filesystem, git, mcp_bridge, memory_tools, terminal, vitals
+from tools import agent_policies, skill_loader
+from tools.handlers import (
+    browser,
+    docker,
+    filesystem,
+    git,
+    mcp_bridge,
+    memory_tools,
+    research_agent,
+    skills as skill_handlers,
+    terminal,
+    vitals,
+)
 from tools.schemas import ToolDefinition
 
 _REGISTRY: dict[str, ToolDefinition] = {}
@@ -204,19 +216,57 @@ def _load_browser_catalog() -> None:
     ))
 
 
+def _load_skill_catalog() -> None:
+    """Phase T4 (TOOLS.md §10) — first-party composite skills + agent tools.
+
+    Read-only composites (plan_today/am_report) are allow+fast — they only
+    call other allow-listed read handlers. agent.research.run does external
+    network + a vault write, so it stays ask+slow like its primitives.
+    """
+    _register(ToolDefinition(
+        name="skill.plan_today", title="Plan today",
+        description="Compose a short plan for today from system status and recent notes.",
+        category="skill",
+        parameters={"type": "object", "properties": {}},
+        permission="allow", latency_class="fast", handler=skill_handlers.plan_today,
+    ))
+    _register(ToolDefinition(
+        name="skill.am_report", title="Morning report",
+        description="Compose a brief morning report from live vitals and runtime status.",
+        category="skill",
+        parameters={"type": "object", "properties": {}},
+        permission="allow", latency_class="fast", handler=skill_handlers.am_report,
+    ))
+    _register(ToolDefinition(
+        name="agent.research.run", title="Research agent",
+        description="Search the web for a query and save findings as a vault note under agents/research/.",
+        category="skill",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        permission="ask", latency_class="slow", handler=research_agent.run,
+    ))
+
+
 _load_core_catalog()
 _load_local_catalog()
 _load_mutating_catalog()
 _load_browser_catalog()
+_load_skill_catalog()
 
 
-def get_catalog(enabled_only: bool = True, categories: list[str] | None = None) -> list[ToolDefinition]:
+def get_catalog(
+    enabled_only: bool = True,
+    categories: list[str] | None = None,
+    agent_id: str | None = None,
+) -> list[ToolDefinition]:
     tools = list(_REGISTRY.values())
     if enabled_only:
         tools = [t for t in tools if t.enabled]
     if categories is not None:
         allowed = set(categories)
         tools = [t for t in tools if t.category in allowed]
+    if agent_id is not None:
+        names = set(agent_policies.allowed_tools(agent_id, [t.name for t in tools]))
+        tools = [t for t in tools if t.name in names]
     return tools
 
 
@@ -248,3 +298,33 @@ def get_tool(name: str) -> ToolDefinition | None:
 
 def tool_count() -> int:
     return len(_REGISTRY)
+
+
+def register_tool(tool: ToolDefinition) -> None:
+    """Register (or replace) a tool at runtime (Phase T4 — POST /api/tools/register)."""
+    _register(tool)
+
+
+def unregister_tool(name: str) -> bool:
+    """Remove a tool by name. Returns whether it existed."""
+    return _REGISTRY.pop(name, None) is not None
+
+
+def reload_skill_manifests() -> dict[str, int]:
+    """Re-scan the skills directory (Phase T4 — POST /api/tools/skills/reload).
+
+    Stale file-backed skill entries are dropped first so edits/deletes are
+    reflected, not just additions — same stale-then-rediscover pattern as
+    refresh_mcp_tools(). Never raises; a missing/unreadable dir just yields 0.
+    """
+    stale = [name for name, t in _REGISTRY.items() if t.source == "skill-file"]
+    for name in stale:
+        _REGISTRY.pop(name, None)
+    loaded = 0
+    for manifest in skill_loader.load_manifests():
+        try:
+            _register(skill_loader.build_tool_definition(manifest, source="skill-file"))
+            loaded += 1
+        except Exception:
+            continue
+    return {"loaded": loaded, "removed": len(stale)}

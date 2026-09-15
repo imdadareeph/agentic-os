@@ -5,7 +5,16 @@
  * A dead runtime or a tool error must NEVER throw into the voice flow.
  */
 
+import { fetchWithTimeout } from '@/lib/fetch'
+
 const RUNTIME_BASE = '/runtime'
+
+// plan sits on the voice hot path (awaited before the LLM) — degrade fast.
+const PLAN_TIMEOUT_MS = 1000
+// loop/approve/execute run real LLM turns + tool work (docker pull, web fetch…).
+const LOOP_TIMEOUT_MS = 180_000
+const EXECUTE_TIMEOUT_MS = 120_000
+const DEFAULT_TIMEOUT_MS = 5000
 
 export interface ToolsHealth {
   loaded: boolean
@@ -70,13 +79,21 @@ export interface ToolExecuteResult {
   preview?: string | null
 }
 
-async function post(path: string, body: unknown): Promise<Response | null> {
+async function post(
+  path: string,
+  body: unknown,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<Response | null> {
   try {
-    return await fetch(`${RUNTIME_BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    return await fetchWithTimeout(
+      `${RUNTIME_BASE}${path}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      timeoutMs
+    )
   } catch {
     return null
   }
@@ -114,7 +131,7 @@ export async function planTools(
   categories?: string[],
   sessionId = ''
 ): Promise<ToolPlan> {
-  const res = await post('/api/tools/plan', { userMessage, sessionId, categories })
+  const res = await post('/api/tools/plan', { userMessage, sessionId, categories }, PLAN_TIMEOUT_MS)
   if (!res || !res.ok) return NO_TOOLS
   try {
     return (await res.json()) as ToolPlan
@@ -132,6 +149,8 @@ export interface ToolLoopArgs {
   categories?: string[]
   allowedPaths?: string[]
   posture?: string
+  provider?: string
+  proceduralEnabled?: boolean
   apiKey?: string
   model?: string
   baseUrl?: string
@@ -140,7 +159,7 @@ export interface ToolLoopArgs {
 }
 
 export async function runToolLoop(args: ToolLoopArgs): Promise<ToolLoopResult | null> {
-  const res = await post('/api/tools/loop', args)
+  const res = await post('/api/tools/loop', args, LOOP_TIMEOUT_MS)
   if (!res || !res.ok) return null
   try {
     return (await res.json()) as ToolLoopResult
@@ -156,7 +175,7 @@ export async function approveTool(
   sessionId = '',
   allowedPaths?: string[]
 ): Promise<ApproveResult> {
-  const res = await post('/api/tools/approve', { approvalId, approved, sessionId, allowedPaths })
+  const res = await post('/api/tools/approve', { approvalId, approved, sessionId, allowedPaths }, EXECUTE_TIMEOUT_MS)
   if (!res || !res.ok) return { approved: false, executed: false, ok: false, error: 'runtime unavailable' }
   try {
     return (await res.json()) as ApproveResult
@@ -168,9 +187,10 @@ export async function approveTool(
 export async function executeTool(
   toolName: string,
   toolArgs: Record<string, unknown> = {},
-  allowedPaths?: string[]
+  allowedPaths?: string[],
+  proceduralEnabled?: boolean
 ): Promise<ToolExecuteResult> {
-  const res = await post('/api/tools/execute', { toolName, args: toolArgs, allowedPaths })
+  const res = await post('/api/tools/execute', { toolName, args: toolArgs, allowedPaths, proceduralEnabled }, EXECUTE_TIMEOUT_MS)
   if (!res || !res.ok) return { ok: false, error: 'runtime unavailable' }
   try {
     return (await res.json()) as ToolExecuteResult

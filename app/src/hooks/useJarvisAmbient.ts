@@ -23,6 +23,7 @@ function effectiveVolume(
       return baseVolume * 0.25
     case 'thinking':
     case 'refining':
+    case 'terminating':
       return baseVolume * 0.5
     default:
       return baseVolume

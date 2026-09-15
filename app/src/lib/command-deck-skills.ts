@@ -1,15 +1,19 @@
 /**
- * Command Deck skill stubs (T3, TOOLS.md §13.3 minimal-manifest note).
+ * Command Deck skills (T3/T4, TOOLS.md §10/§13.3).
  *
- * Not the full T4 skill loader — just enough to make PLAN-TODAY / AM-REPORT
- * real: each is a preset prompt run through the tool loop so JARVIS can pull
- * live data (vitals, memory, filesystem) instead of toggling a decorative
- * button. Never throws — callers get a plain string result or an error one.
+ * Two flavors:
+ * - Direct composite tools (PLAN-TODAY, AM-REPORT): instant, deterministic,
+ *   call the registered skill.* tools (runtime/tools/handlers/skills.py)
+ *   straight via executeTool — no LLM round-trip, no provider restriction.
+ * - Preset-prompt skills (TREND-SCAN, GH-TRENDING, WK-REVIEW): need free-form
+ *   web synthesis an LLM has to phrase, so they run through the tool loop.
+ * Never throws — callers get a plain string result or an error one.
  */
 import { toast } from 'sonner'
 import { getAiSettings } from '@/stores/ai-settings-store'
 import { getToolSettings, enabledCategories, areToolsActive } from '@/stores/tool-settings-store'
 import { planTools, runToolLoop, executeTool } from '@/services/tools'
+import { getOllamaModels } from '@/services/llm/ollama'
 
 export interface SkillDefinition {
   id: string
@@ -18,17 +22,23 @@ export interface SkillDefinition {
 }
 
 export const COMMAND_DECK_SKILLS: Record<string, SkillDefinition> = {
-  'plan-today': {
-    id: 'plan-today',
-    label: 'Plan Today',
+  'trend-scan': {
+    id: 'trend-scan',
+    label: 'Trend Scan',
     prompt:
-      'Give me a short plan for today. Check system status and any relevant recent notes, then summarize in 3-5 bullet points.',
+      'Search the web for what is trending today in AI agents and local-first software. Summarize the top 3 items in one line each.',
   },
-  'am-report': {
-    id: 'am-report',
-    label: 'AM Report',
+  'gh-trending': {
+    id: 'gh-trending',
+    label: 'GH Trending',
     prompt:
-      'Give me a brief morning report: current vitals, system status, and anything notable from recent memory.',
+      'Search the web for today\'s trending GitHub repositories. List the top 3 with a one-line description each.',
+  },
+  'wk-review': {
+    id: 'wk-review',
+    label: 'Week Review',
+    prompt:
+      'Review this week: check recent notes and system status, then summarize what happened in 3-5 bullet points.',
   },
 }
 
@@ -43,10 +53,23 @@ export async function runSkill(skillId: string, sessionId = ''): Promise<string 
   }
 
   const ai = getAiSettings()
-  const provider = ai.providers[ai.activeProvider]
-  if (ai.activeProvider !== 'anthropic' || !provider.apiKey) {
-    toast.info(`${skill.label}: requires Anthropic active with an API key`)
+  const providerId = ai.activeProvider
+  const provider = ai.providers[providerId]
+  if (providerId !== 'anthropic' && providerId !== 'ollama') {
+    toast.info(`${skill.label}: requires Anthropic or Ollama active`)
     return null
+  }
+  if (providerId === 'anthropic' && !provider.apiKey) {
+    toast.info(`${skill.label}: requires an Anthropic API key`)
+    return null
+  }
+  let model = provider.model || undefined
+  if (providerId === 'ollama' && !model) {
+    model = (await getOllamaModels(provider.baseUrl))[0]
+    if (!model) {
+      toast.info(`${skill.label}: no Ollama models available`)
+      return null
+    }
   }
 
   const toastId = toast.loading(`${skill.label} — running…`)
@@ -63,9 +86,9 @@ export async function runSkill(skillId: string, sessionId = ''): Promise<string 
       categories,
       allowedPaths: toolCfg.allowedPaths.length ? toolCfg.allowedPaths : undefined,
       posture: toolCfg.defaultPermission,
-      apiKey: provider.apiKey,
-      model: provider.model || undefined,
-      baseUrl: provider.baseUrl,
+      provider: providerId,
+      apiKey: provider.apiKey || undefined,
+      model,
       maxTokens: 400,
     })
 
@@ -83,6 +106,43 @@ export async function runSkill(skillId: string, sessionId = ''): Promise<string 
     toast.error(`${skill.label}: failed`, { id: toastId })
     return null
   }
+}
+
+/** PLAN-TODAY / AM-REPORT: call the registered composite skill tool directly. */
+export async function runDirectSkill(toolName: string, label: string): Promise<void> {
+  const toastId = toast.loading(`${label} — running…`)
+  const res = await executeTool(toolName, {})
+  if (res.needsApproval) {
+    toast.info(`${label}: needs approval — open Tool Settings > Debug`, { id: toastId })
+    return
+  }
+  if (!res.ok) {
+    toast.error(`${label}: failed`, { id: toastId, description: res.error ?? undefined })
+    return
+  }
+  const summary = (res.data as { summary?: string } | null)?.summary ?? 'Done.'
+  toast.success(label, { id: toastId, description: summary })
+}
+
+/** RESEARCH: run the composite research agent (agent.research.run) with a user-supplied query. */
+export async function runResearchSkill(): Promise<void> {
+  const query = window.prompt('Research query:')?.trim()
+  if (!query) return
+  const toastId = toast.loading(`Research — "${query}"…`)
+  const res = await executeTool('agent.research.run', { query })
+  if (res.needsApproval) {
+    toast.info('Research: needs approval — open Tool Settings > Debug', { id: toastId })
+    return
+  }
+  if (!res.ok) {
+    toast.error('Research: failed', { id: toastId, description: res.error ?? undefined })
+    return
+  }
+  const data = res.data as { notePath?: string; resultCount?: number } | null
+  toast.success('Research saved', {
+    id: toastId,
+    description: data?.notePath ?? 'Note written under agents/research/',
+  })
 }
 
 /** METRICS-PULL: log a real vitals.fetch tool run (T3 exit criterion 1). */

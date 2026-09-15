@@ -17,7 +17,7 @@ export const AI_PROVIDER_REGISTRY: AiProviderDefinition[] = [
     label: 'Ollama',
     requiresApiKey: false,
     defaultUrl: '/ollama',
-    defaultModel: '',
+    defaultModel: 'llama3.2:latest',
     defaultSystemInstructions: DEFAULT_JARVIS_SYSTEM_PROMPT,
   },
   {

@@ -9,13 +9,17 @@ import { llmGenerate } from '@/services/voicebox'
 import { getJarvisSettings } from '@/stores/jarvis-settings-store'
 import { getVoiceSettings } from '@/stores/voice-settings-store'
 import { getAiSettings } from '@/stores/ai-settings-store'
+import { getMemorySettings } from '@/stores/memory-settings-store'
 import {
   areToolsActive,
   enabledCategories,
   getToolSettings,
 } from '@/stores/tool-settings-store'
 import { planTools, runToolLoop, approveTool } from '@/services/tools'
+import { mightNeedTools } from '@/lib/tool-plan'
 import { requestApprovals } from '@/lib/tool-approval-broker'
+import { logActivity } from '@/services/activity-log'
+import { getOllamaModels } from '@/services/llm/ollama'
 import type { VitalsResponse } from '@/types/vitals'
 import { speakText } from '@/services/voice'
 
@@ -80,11 +84,25 @@ export async function thinkWithTools(
   const ai = getAiSettings()
   const providerId = ai.activeProvider
   const cfg = ai.providers[providerId]
-  // Only Anthropic runs the native tool loop for now; else normal chat.
-  if (providerId !== 'anthropic' || !cfg.apiKey) {
+  // Native tool loop runs on Anthropic (needs a key) or Ollama (local, tool-
+  // capable models only — e.g. llama3.1, qwen2.5). Other providers chat only.
+  if (providerId !== 'anthropic' && providerId !== 'ollama') {
     return think(userMessage, history, vitals, signal, memoryContext)
   }
+  if (providerId === 'anthropic' && !cfg.apiKey) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
+  let resolvedModel = cfg.model || undefined
+  if (providerId === 'ollama' && !resolvedModel) {
+    resolvedModel = (await getOllamaModels(cfg.baseUrl))[0]
+    if (!resolvedModel) return think(userMessage, history, vitals, signal, memoryContext)
+  }
 
+  // Zero-RTT local gate first: most turns are plain chat, and the server plan
+  // round-trip on every one of them is pure added voice latency.
+  if (!mightNeedTools(userMessage)) {
+    return think(userMessage, history, vitals, signal, memoryContext)
+  }
   const categories = enabledCategories()
   const plan = await planTools(userMessage, categories, sessionId)
   if (!plan.useTools) {
@@ -104,18 +122,33 @@ export async function thinkWithTools(
     sessionId,
     categories,
     allowedPaths: toolCfg.allowedPaths.length ? toolCfg.allowedPaths : undefined,
-    apiKey: cfg.apiKey,
-    model: cfg.model || undefined,
-    baseUrl: cfg.baseUrl,
+    provider: providerId,
+    apiKey: cfg.apiKey || undefined,
+    model: resolvedModel,
+    // Frontend baseUrl fields are Vite proxy aliases (`/anthropic`, `/ollama`)
+    // — meaningless from the backend process. Let the runtime use its own
+    // absolute default per provider (matches memory/embedder.py's OLLAMA_URL).
     maxTokens: effectiveMaxTokens(settings),
     temperature: settings.temperature,
     posture: toolCfg.defaultPermission,
+    proceduralEnabled: getMemorySettings().proceduralMemoryEnabled,
   })
 
   // A mutating tool needs approval: ask the user via the dialog, then run the
-  // approved ones. The loop is paused server-side; we speak the outcome.
+  // approved ones. Approval + execution (e.g. docker.run pulling an image) can
+  // take a while — voice latency is sacred, so we speak the ack NOW, before
+  // waiting on the dialog or any tool work, then speak the outcome separately
+  // once everything resolves (TOOLS.md §6.2 ack-then-async).
   if (result?.approvalRequired?.length) {
     const allowedPaths = toolCfg.allowedPaths.length ? toolCfg.allowedPaths : undefined
+    if (result.reply) {
+      try {
+        await speakText(result.reply, getVoiceSettings().voiceboxProfile)
+      } catch {
+        // Voicebox down — the dialog still opens; the follow-up reply below
+        // gets spoken normally by the caller once it's ready.
+      }
+    }
     const decisions = await requestApprovals(
       result.approvalRequired.map(a => ({
         approvalId: a.approvalId,
@@ -132,12 +165,19 @@ export async function thinkWithTools(
       else if (res.ok) outcomes.push(`${req.toolName}: done`)
       else outcomes.push(`${req.toolName}: failed — ${res.error ?? 'error'}`)
     }
-    const ack = result.reply ? `${result.reply}\n` : ''
-    return `${ack}${outcomes.join('. ')}.`
+    return `${outcomes.join('. ')}.`
   }
 
-  // Degraded / no reply / runtime down → fall back to the normal path.
+  // Degraded / no reply / runtime down → fall back to the normal path. This
+  // costs a SECOND full LLM generation on top of the failed loop — surface it
+  // in Live Activity so silent 2x-latency turns are diagnosable, not invisible.
   if (!result || result.degraded || !result.reply) {
+    logActivity(
+      'tool',
+      'Tool loop degraded — falling back to plain think()',
+      'error',
+      result?.reason ?? 'runtime unavailable'
+    )
     return think(userMessage, history, vitals, signal, memoryContext)
   }
   return result.reply

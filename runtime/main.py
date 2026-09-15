@@ -18,6 +18,7 @@ from memory import (
     conversation,
     embedder,
     episodic,
+    graph as memory_graph,
     idle,
     jobs,
     obsidian_client,
@@ -28,6 +29,7 @@ from memory import (
     retention,
     semantic,
     sync,
+    vault_read,
 )
 from memory.context_builder import build_context_block, build_procedural_block
 from models.memory import (
@@ -40,6 +42,7 @@ from models.memory import (
     HeartbeatResponse,
     MaintenanceRequest,
     MaintenanceResponse,
+    MemoryGraphResponse,
     ObsidianConfigRequest,
     ObsidianConfigResponse,
     ReflectResponse,
@@ -53,10 +56,12 @@ from models.memory import (
     ToolRunRequest,
     ToolRunResponse,
     Turn,
+    VaultNoteResponse,
 )
 from models.tools import (
     ApproveRequest,
     ApproveResponse,
+    SkillsReloadResponse,
     ToolCatalogEntry,
     ToolCatalogResponse,
     ToolExecuteRequest,
@@ -65,6 +70,8 @@ from models.tools import (
     ToolLoopResponse,
     ToolPlanRequest,
     ToolPlanResponse,
+    ToolRegisterRequest,
+    ToolRegisterResponse,
     ToolsHealthResponse,
     ToolsMcpRefreshResponse,
 )
@@ -72,6 +79,7 @@ from tools import events as tool_events
 from tools import executor as tool_executor
 from tools import registry as tool_registry
 from tools import router as tool_router
+from tools import skill_loader
 from tools.handlers import mcp_bridge
 from tools.loop import run_loop
 from tools.schemas import ToolContext
@@ -97,6 +105,9 @@ async def lifespan(app: FastAPI):
     jobs_task = asyncio.create_task(jobs.run_loop(app.state.db))
     # Discover external MCP servers off the startup path (subprocess I/O; never blocks boot).
     asyncio.create_task(tool_registry.refresh_mcp_tools())
+    # Load user-authored skill manifests (Phase T4) — cheap sync file reads, but
+    # kept off the import path so tests can monkeypatch the skills dir per-case.
+    tool_registry.reload_skill_manifests()
     yield
     jobs_task.cancel()
     retention_task.cancel()
@@ -311,6 +322,27 @@ async def maintenance(body: MaintenanceRequest) -> MaintenanceResponse:
     return MaintenanceResponse(**result)
 
 
+@app.get("/api/memory/graph", response_model=MemoryGraphResponse)
+async def memory_graph_endpoint(
+    granularity: str = "note", maxNodes: int = 500, maxLinks: int = 2000
+) -> MemoryGraphResponse:
+    """Memory Galaxy view (Phase MV) — vault walk, on-demand only. Never called
+    from the voice/conversation path, so it carries no latency budget."""
+    result = await memory_graph.build_graph(
+        app.state.db, granularity=granularity, max_nodes=maxNodes, max_links=maxLinks
+    )
+    return MemoryGraphResponse(**result)
+
+
+@app.get("/api/memory/vault/note", response_model=VaultNoteResponse)
+async def vault_note(path: str) -> VaultNoteResponse:
+    """Memory Galaxy preview (MV.2) — read one vault note on demand."""
+    result = await vault_read.read_note(app.state.db, path)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return VaultNoteResponse(**result)
+
+
 # --- Tools (Phase T0) --------------------------------------------------------
 
 
@@ -331,19 +363,53 @@ async def tools_mcp_refresh() -> ToolsMcpRefreshResponse:
     return ToolsMcpRefreshResponse(registered=registered)
 
 
+@app.post("/api/tools/skills/reload", response_model=SkillsReloadResponse)
+async def tools_skills_reload() -> SkillsReloadResponse:
+    """Re-scan ~/jarvis/skills/ for manifest changes (Phase T4, TOOLS.md §10)."""
+    result = tool_registry.reload_skill_manifests()
+    return SkillsReloadResponse(**result)
+
+
+@app.post("/api/tools/register", response_model=ToolRegisterResponse)
+async def tools_register(body: ToolRegisterRequest) -> ToolRegisterResponse:
+    """Register a skill/agent tool at runtime without a manifest file (Phase T4)."""
+    try:
+        tool = skill_loader.build_tool_definition(
+            body.manifest.model_dump(), source=f"{body.source}:{body.manifest.id}"
+        )
+        tool_registry.register_tool(tool)
+        return ToolRegisterResponse(registered=True, name=tool.name)
+    except Exception as err:
+        return ToolRegisterResponse(registered=False, error=str(err))
+
+
+@app.delete("/api/tools/register/{skill_id}", response_model=ToolRegisterResponse)
+async def tools_unregister(skill_id: str) -> ToolRegisterResponse:
+    """Remove a previously registered skill/agent tool by id (Phase T4)."""
+    name = f"skill.{skill_id}"
+    removed = tool_registry.unregister_tool(name)
+    return ToolRegisterResponse(registered=not removed, name=name if removed else None)
+
+
 @app.get("/api/tools/catalog", response_model=ToolCatalogResponse)
-async def tools_catalog(toolsEnabled: bool = True, categories: str | None = None) -> ToolCatalogResponse:
+async def tools_catalog(
+    toolsEnabled: bool = True, categories: str | None = None, agentId: str | None = None
+) -> ToolCatalogResponse:
     if not toolsEnabled:
         return ToolCatalogResponse(tools=[])
     cats = [c for c in categories.split(",") if c] if categories else None
-    tools = [ToolCatalogEntry(**t.to_public_dict()) for t in tool_registry.get_catalog(categories=cats)]
+    tools = [
+        ToolCatalogEntry(**t.to_public_dict())
+        for t in tool_registry.get_catalog(categories=cats, agent_id=agentId)
+    ]
     return ToolCatalogResponse(tools=tools)
 
 
 @app.post("/api/tools/plan", response_model=ToolPlanResponse)
 async def tools_plan(body: ToolPlanRequest) -> ToolPlanResponse:
     idle.touch()
-    result = tool_router.plan(body.userMessage, tool_registry.get_catalog(categories=body.categories))
+    catalog = tool_registry.get_catalog(categories=body.categories, agent_id=body.agentId)
+    result = tool_router.plan(body.userMessage, catalog)
     return ToolPlanResponse(**result)
 
 
@@ -353,7 +419,9 @@ async def tools_execute(body: ToolExecuteRequest) -> ToolExecuteResponse:
         db=app.state.db, session_id=body.sessionId or None,
         agent_id=body.agentId, allowed_paths=body.allowedPaths,
     )
-    result = await tool_executor.execute(body.toolName, body.args, ctx, posture=body.posture)
+    result = await tool_executor.execute(
+        body.toolName, body.args, ctx, posture=body.posture, procedural_enabled=body.proceduralEnabled
+    )
     return ToolExecuteResponse(
         ok=result.ok, data=result.data, error=result.error,
         needsApproval=result.needs_approval, approvalId=result.approval_id, preview=result.preview,
@@ -380,6 +448,8 @@ async def tools_loop(body: ToolLoopRequest) -> ToolLoopResponse:
         max_tokens=body.maxTokens,
         temperature=body.temperature,
         posture=body.posture,
+        provider=body.provider,
+        procedural_enabled=body.proceduralEnabled,
     )
     return ToolLoopResponse(**result)
 

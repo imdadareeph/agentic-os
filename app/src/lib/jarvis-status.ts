@@ -7,6 +7,7 @@ import {
   Mic,
   Moon,
   Pause,
+  Power,
 } from 'lucide-react'
 import type { VoiceMode } from '@/config/voice'
 import type { ConversationPhase } from '@/hooks/useRealtimeConversation'
@@ -19,6 +20,7 @@ export type JarvisDisplayStatus =
   | 'thinking'
   | 'speaking'
   | 'paused'
+  | 'terminating'
   | 'error'
 
 export interface JarvisStatusInput {
@@ -36,6 +38,7 @@ export function resolveJarvisDisplayStatus(input: JarvisStatusInput): JarvisDisp
     if (!conversationActive) return 'sleeping'
     if (phase === 'listening') return 'listening'
     if (phase === 'speaking') return 'speaking'
+    if (phase === 'terminating') return 'terminating'
     if (phase === 'thinking' || phase === 'refining') return 'thinking'
     if (phase === 'error') return 'error'
     if (conversationActive && phase === 'idle') return 'idle'
@@ -86,6 +89,12 @@ export const JARVIS_STATUS_CONFIG: Record<
     label: 'Paused',
     Icon: Pause,
     accentClass: 'text-amber-400/80',
+  },
+  terminating: {
+    label: 'Terminating',
+    Icon: Power,
+    pulse: true,
+    accentClass: 'text-amber-500',
   },
   error: {
     label: 'Error',
