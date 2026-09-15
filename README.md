@@ -1,4 +1,4 @@
-<a href="https://github.com/imdadareeph/agentic-os">
+ <a href="https://github.com/imdadareeph/agentic-os">
   <img width="1500" alt="Agentic OS — JARVIS voice command center" src="app/public/screens/screen0.png" />
 </a>
 
@@ -387,9 +387,13 @@ Agentic OS/
 │   ├── src/                  # components, hooks, services, stores
 │   ├── public/               # screens, voices, static assets
 │   └── server/               # vitals API (Vite plugin)
+├── docs/                     # specs, playbooks, plans, reference (see docs/README.md)
+├── goal.md                   # north star
+├── CLAUDE.md                 # agent session rules
+├── runtime/                  # Python memory + tools backend
 ├── docker-compose.voice.yml  # Whisper Docker service
 ├── jarvis-voice.wav          # reference voice sample (copy to app/public/voices/)
-└── .cursor/aidocs/docs/      # architecture & design documentation
+└── .cursor/aidocs/docs/      # local engineering docs (gitignored)
 ```
 
 ---
@@ -674,8 +678,11 @@ Use **Chrome or Edge** for live speech recognition. Safari/Firefox fall back to 
 
 | Document | Description |
 | -------- | ----------- |
+| [goal.md](goal.md) | North star — phases, on-disk layout, definition of done |
+| [Docs index](docs/README.md) | Specs, playbooks, plans, and reference |
+| [CLAUDE.md](CLAUDE.md) | Agent session rules for Claude Code |
 | [app/README.md](app/README.md) | Frontend setup, voice & JARVIS settings |
-| [Docs index](.cursor/aidocs/docs/README.md) | Internal documentation index |
+| [Local docs index](.cursor/aidocs/docs/README.md) | Local engineering docs (gitignored) |
 | [ARCHITECTURE](.cursor/aidocs/docs/ARCHITECTURE.md) | System architecture |
 | [DESIGN](.cursor/aidocs/docs/DESIGN.md) | UI/UX design system |
 | [ROADMAP](.cursor/aidocs/docs/ROADMAP.md) | Development roadmap |
