@@ -33,6 +33,9 @@
 | -------- | ----------- |
 | [`plans/fix.md`](plans/fix.md) | Voice latency / slow-response fix plan |
 | [`plans/memory-view.md`](plans/memory-view.md) | Memory Galaxy View (Phase MV) |
+| [`plans/MEMORY_EVOLUTION_PLAN.md`](plans/MEMORY_EVOLUTION_PLAN.md) | Prefetch (MP), Profile (MF), Persona (ME) — Mem0/VoiceMem patterns |
+| [`plans/WEB_TERMINAL_ANALYSIS.md`](plans/WEB_TERMINAL_ANALYSIS.md) | Voice-opened web PTY vs ttyd/Wetty/Xterm.js; Ghost OS + aictl fit |
+| [`plans/WEB_TERMINAL_EXTRACTION.md`](plans/WEB_TERMINAL_EXTRACTION.md) | File-level extract from local aictl + Ghost OS clones |
 
 ---
 
