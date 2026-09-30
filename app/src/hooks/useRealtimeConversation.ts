@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getRecorderMimeType, startMicLevelMeter } from '@/lib/audio'
 import { isAbortError } from '@/lib/fetch'
 import { buildSessionGreeting } from '@/lib/time-greeting'
+import { resolveConversationHistory } from '@/lib/conversation-history'
+import { shouldRetrieveMemory } from '@/lib/should-retrieve'
 import {
   extractAdminCode,
   isShutdownIntent,
@@ -20,7 +22,9 @@ import {
   createSession,
   endSession,
   storeTurn,
-  retrieveMemory,
+  finalizeRetrieve,
+  startSpeculativeRetrieve,
+  cancelSpeculativePrefetch,
   writeEpisodic,
   looksResearchy,
   sendHeartbeat,
@@ -97,6 +101,8 @@ export function useRealtimeConversation(
   const stopMeterRef = useRef<(() => void) | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** MP2: interim STT stable ≥500ms before speculative semantic prefetch. */
+  const interimStableTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const turnTextRef = useRef('')
   const interimRef = useRef('')
   const processingRef = useRef(false)
@@ -260,6 +266,11 @@ export function useRealtimeConversation(
 
   const interruptActiveWork = useCallback(() => {
     clearSilenceTimer()
+    if (interimStableTimerRef.current) {
+      clearTimeout(interimStableTimerRef.current)
+      interimStableTimerRef.current = null
+    }
+    cancelSpeculativePrefetch()
     stopRecognition()
     abortRef.current?.abort()
     abortRef.current = null
@@ -272,6 +283,54 @@ export function useRealtimeConversation(
   }, [clearSilenceTimer, stopRecognition])
 
   const lastInterimRef = useRef('')
+
+  const clearInterimPrefetchTimer = useCallback(() => {
+    if (interimStableTimerRef.current) {
+      clearTimeout(interimStableTimerRef.current)
+      interimStableTimerRef.current = null
+    }
+  }, [])
+
+  /** MP2: after interim text is stable, run local gate then fire-and-forget retrieve. */
+  const scheduleInterimSpeculativePrefetch = useCallback(
+    (text: string) => {
+      clearInterimPrefetchTimer()
+      const trimmed = text.trim()
+      if (trimmed.length < getVoiceSettings().minTurnChars) return
+
+      interimStableTimerRef.current = setTimeout(() => {
+        interimStableTimerRef.current = null
+        if (processingRef.current || pausedRef.current || !activeRef.current) return
+        if (interimRef.current.trim() !== trimmed) return
+
+        const mem = getMemorySettings()
+        if (
+          !sessionIdRef.current ||
+          !isMemoryPersistenceEnabled() ||
+          mem.fastMode ||
+          !mem.semanticMemoryEnabled
+        ) {
+          return
+        }
+        if (!shouldRetrieveMemory(trimmed)) return
+
+        const memoryCount = mem.conversationMemoryEnabled
+          ? Math.max(0, mem.conversationTurnLimit)
+          : 0
+
+        startSpeculativeRetrieve(sessionIdRef.current, trimmed, {
+          semanticEnabled: true,
+          semanticTopK: mem.semanticTopK,
+          semanticMinScore: mem.semanticMinScore,
+          conversationLimit: memoryCount > 0 ? memoryCount * 2 : 0,
+          maxRetrievedMemories: mem.maxRetrievedMemories,
+          sessionContextTokens: mem.sessionContextTokens,
+        })
+      }, 500)
+    },
+    [clearInterimPrefetchTimer]
+  )
+
   const scheduleTurnEnd = useCallback(
     (delayMs?: number) => {
       if (pausedRef.current) return
@@ -301,9 +360,11 @@ export function useRealtimeConversation(
         setInterimTranscript(text)
         ensureRecording()
         scheduleTurnEnd()
+        scheduleInterimSpeculativePrefetch(text)
       },
       onFinal: text => {
         if (processingRef.current || pausedRef.current) return
+        clearInterimPrefetchTimer()
         turnTextRef.current = `${turnTextRef.current} ${text}`.trim()
         interimRef.current = ''
         lastInterimRef.current = ''
@@ -316,7 +377,7 @@ export function useRealtimeConversation(
       },
       onEnd: () => {},
     })
-  }, [ensureRecording, scheduleTurnEnd, stopRecognition])
+  }, [clearInterimPrefetchTimer, ensureRecording, scheduleInterimSpeculativePrefetch, scheduleTurnEnd, stopRecognition])
 
   const resumeListening = useCallback(() => {
     if (!activeRef.current || pausedRef.current) {
@@ -337,6 +398,8 @@ export function useRealtimeConversation(
       setError(`Speak at least ${cfg.minTurnChars} characters — heard: "${trimmed || '…'}"`)
       return
     }
+
+    clearInterimPrefetchTimer()
 
     const adminFlow =
       adminAuthPendingRef.current || isShutdownIntent(trimmed)
@@ -436,12 +499,46 @@ export function useRealtimeConversation(
     const finalText = trimmed
     setPhase('thinking')
 
-    // Turn limit migrated from JarvisSettings.conversationMemory (M1).
-    const memoryCount = Math.max(0, getMemorySettings().conversationTurnLimit)
-    const history =
-      memoryCount > 0
-        ? turnsRef.current.slice(-memoryCount * 2)
-        : []
+    const mem = getMemorySettings()
+    const memoryCount = mem.conversationMemoryEnabled
+      ? Math.max(0, mem.conversationTurnLimit)
+      : 0
+    const priorTurnCount = turns.length
+    // turnsRef is updated synchronously for the greeting; excludes this user turn
+    // because setTurns above has not flushed into the ref yet.
+    let history = resolveConversationHistory(turnsRef.current, [], memoryCount)
+    const localHistoryStale =
+      memoryCount > 0 && priorTurnCount > 0 && turnsRef.current.length < priorTurnCount
+
+    const needsSemantic =
+      Boolean(sessionIdRef.current) &&
+      isMemoryPersistenceEnabled() &&
+      mem.semanticMemoryEnabled &&
+      !mem.fastMode
+
+    const needsBackendConversation =
+      Boolean(sessionIdRef.current) &&
+      isMemoryPersistenceEnabled() &&
+      mem.conversationMemoryEnabled &&
+      !mem.fastMode &&
+      memoryCount > 0 &&
+      (history.length === 0 || localHistoryStale)
+
+    const shouldRetrieve = needsSemantic || needsBackendConversation
+
+    // MP1/MP2: retrieve overlaps Whisper refine; MP2 reuses interim prefetch on final.
+    const retrievePromise =
+      shouldRetrieve && sessionIdRef.current
+        ? finalizeRetrieve(sessionIdRef.current, finalText, {
+            semanticEnabled: needsSemantic,
+            semanticTopK: mem.semanticTopK,
+            semanticMinScore: mem.semanticMinScore,
+            conversationLimit: memoryCount > 0 ? memoryCount * 2 : 20,
+            maxRetrievedMemories: mem.maxRetrievedMemories,
+            sessionContextTokens: mem.sessionContextTokens,
+            signal: controller.signal,
+          })
+        : null
 
     void (async () => {
       const whisperOnline = peekWhisperStatus()?.online === true
@@ -470,10 +567,7 @@ export function useRealtimeConversation(
       }
     })()
 
-    // Retrieve semantic memory (M2) before the LLM call. Gated + degrades to
-    // empty on any failure — the runtime enforces its own 300ms timeout.
     let memoryContext: string | null = null
-    const mem = getMemorySettings()
     if (sessionIdRef.current && isMemoryPersistenceEnabled() && !mem.fastMode) {
       // Heartbeat: keep the runtime active-clock warm + push the Memory Budget so
       // the idle background worker stands down while we're mid-conversation.
@@ -485,20 +579,18 @@ export function useRealtimeConversation(
         maxBackgroundGpuPercent: mem.maxBackgroundGpuPercent,
       }).catch(() => {})
     }
-    if (
-      sessionIdRef.current &&
-      isMemoryPersistenceEnabled() &&
-      mem.semanticMemoryEnabled &&
-      !mem.fastMode
-    ) {
-      const result = await retrieveMemory(sessionIdRef.current, finalText, {
-        semanticEnabled: true,
-        semanticTopK: mem.semanticTopK,
-        semanticMinScore: mem.semanticMinScore,
-        maxRetrievedMemories: mem.maxRetrievedMemories,
-        sessionContextTokens: mem.sessionContextTokens,
-      })
+
+    if (retrievePromise) {
+      const result = await retrievePromise
+      if (pausedRef.current || controller.signal.aborted) return
       memoryContext = result.contextBlock || null
+      if (memoryCount > 0) {
+        history = resolveConversationHistory(
+          turnsRef.current,
+          result.conversation,
+          memoryCount
+        )
+      }
     }
     if (pausedRef.current || controller.signal.aborted) return
 
@@ -614,6 +706,17 @@ export function useRealtimeConversation(
 
       const cfg = getVoiceSettings()
       const greeting = buildSessionGreeting()
+      const greetingId = newTurnId()
+      const greetingTurn: ConversationTurn = {
+        id: greetingId,
+        role: 'assistant',
+        text: greeting,
+        timestamp: Date.now(),
+      }
+      turnsRef.current = [...turnsRef.current, greetingTurn]
+      setTurns(prev => [...prev, greetingTurn])
+      persistTurn(greetingId, 'assistant', greeting)
+
       setPhase('speaking')
       try {
         await speakText(greeting, cfg.voiceboxProfile)
@@ -694,6 +797,8 @@ export function useRealtimeConversation(
   }, [conversationActive, conversationPaused, startConversation, stopConversation])
 
   const clearSession = useCallback(() => {
+    clearInterimPrefetchTimer()
+    cancelSpeculativePrefetch()
     setTurns([])
     turnsRef.current = []
     setInterimTranscript('')
@@ -717,7 +822,7 @@ export function useRealtimeConversation(
       if (prior) await endSession(prior)
       sessionIdRef.current = await createSession()
     })().catch(() => {})
-  }, [])
+  }, [clearInterimPrefetchTimer])
 
   useEffect(() => {
     return () => {

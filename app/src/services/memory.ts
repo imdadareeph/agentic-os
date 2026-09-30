@@ -8,7 +8,7 @@
  */
 
 import { logActivity } from '@/services/activity-log'
-import { fetchWithTimeout } from '@/lib/fetch'
+import { fetchWithTimeout, fetchWithTimeoutAndSignal, isAbortError } from '@/lib/fetch'
 
 const RUNTIME_BASE = '/runtime'
 
@@ -59,10 +59,72 @@ export interface RetrieveOptions {
   semanticEnabled?: boolean
   semanticTopK?: number
   semanticMinScore?: number
+  /** Max conversation turns from SQLite (pairs × 2). */
+  conversationLimit?: number
   /** Memory Budget: hard cap on injected memories (primary retrieve cap). */
   maxRetrievedMemories?: number
   /** Memory Budget: total inject token budget for the prompt. */
   sessionContextTokens?: number
+  /** Cancel in-flight retrieve on barge-in / turn abort (MP1). */
+  signal?: AbortSignal
+}
+
+/** MP1 — session-scoped prefetch cache; ~30s TTL, invalidated on store. */
+const PREFETCH_TTL_MS = 30_000
+
+interface PrefetchCacheEntry {
+  sessionId: string
+  queryKey: string
+  result: RetrieveResult
+  ts: number
+}
+
+let prefetchCache: PrefetchCacheEntry | null = null
+const inFlightRetrieves = new Map<string, Promise<RetrieveResult>>()
+
+interface SpeculativePrefetch {
+  sessionId: string
+  userMessage: string
+  queryKey: string
+  promise: Promise<RetrieveResult>
+  controller: AbortController
+}
+
+let speculativePrefetch: SpeculativePrefetch | null = null
+
+/** Abort interim speculative retrieve (barge-in / session end). */
+export function cancelSpeculativePrefetch(): void {
+  if (!speculativePrefetch) return
+  speculativePrefetch.controller.abort()
+  speculativePrefetch = null
+}
+
+export function invalidatePrefetchCache(): void {
+  prefetchCache = null
+  inFlightRetrieves.clear()
+  cancelSpeculativePrefetch()
+}
+
+/** Drop cached retrieve results after a new turn is stored; keep in-flight fetches. */
+function invalidatePrefetchResultCache(): void {
+  prefetchCache = null
+}
+
+function buildRetrieveQueryKey(
+  sessionId: string,
+  userMessage: string,
+  options: RetrieveOptions
+): string {
+  return [
+    sessionId,
+    userMessage,
+    options.semanticEnabled ?? false,
+    options.conversationLimit ?? 20,
+    options.semanticTopK ?? 3,
+    options.semanticMinScore ?? 0.65,
+    options.maxRetrievedMemories ?? 25,
+    options.sessionContextTokens ?? 8192,
+  ].join('\0')
 }
 
 const EMPTY_RETRIEVE: RetrieveResult = {
@@ -159,8 +221,30 @@ export async function storeTurn(
   turn: MemoryTurn,
   agentId = 'jarvis'
 ): Promise<void> {
+  invalidatePrefetchResultCache()
   const res = await post('/api/memory/store', { sessionId, turn, agentId })
   logActivity('memory', 'Store turn', res?.ok ? 'ok' : 'error')
+}
+
+async function postRetrieve(
+  body: Record<string, unknown>,
+  signal?: AbortSignal
+): Promise<Response | null> {
+  try {
+    return await fetchWithTimeoutAndSignal(
+      `${RUNTIME_BASE}/api/memory/retrieve`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      RETRIEVE_TIMEOUT_MS,
+      signal
+    )
+  } catch (err) {
+    if (isAbortError(err) || signal?.aborted) return null
+    return null
+  }
 }
 
 /** Fetch memory for a session. Degrades to an empty envelope on any failure. */
@@ -170,43 +254,198 @@ export async function retrieveMemory(
   options: RetrieveOptions = {},
   agentId = 'jarvis'
 ): Promise<RetrieveResult> {
-  const startedAt = performance.now()
-  const res = await post(
-    '/api/memory/retrieve',
-    {
-    sessionId,
-    userMessage,
-    agentId,
-    semanticEnabled: options.semanticEnabled ?? false,
-    semanticTopK: options.semanticTopK ?? 3,
-    semanticMinScore: options.semanticMinScore ?? 0.65,
-    maxRetrievedMemories: options.maxRetrievedMemories ?? 25,
-    sessionContextTokens: options.sessionContextTokens ?? 8192,
-    },
-    RETRIEVE_TIMEOUT_MS
-  )
-  const ms = Math.round(performance.now() - startedAt)
-  if (!res || !res.ok) {
-    logActivity('memory', 'Retrieve memory', 'error', `${ms}ms`)
-    return EMPTY_RETRIEVE
+  const { signal } = options
+  if (signal?.aborted) return EMPTY_RETRIEVE
+
+  const queryKey = buildRetrieveQueryKey(sessionId, userMessage, options)
+  const now = Date.now()
+  const cached = prefetchCache
+  if (
+    cached &&
+    cached.sessionId === sessionId &&
+    cached.queryKey === queryKey &&
+    now - cached.ts < PREFETCH_TTL_MS
+  ) {
+    logActivity('memory', 'Retrieve memory', 'ok', 'cache hit')
+    return cached.result
   }
-  try {
-    const result = (await res.json()) as RetrieveResult
-    logActivity(
-      'memory',
-      'Retrieve memory',
-      'ok',
-      `${ms}ms · ${result.conversation.length} conv · ${result.semantic.length} semantic`
+
+  const inFlight = inFlightRetrieves.get(queryKey)
+  if (inFlight) return inFlight
+
+  const promise = (async (): Promise<RetrieveResult> => {
+    const startedAt = performance.now()
+    const res = await postRetrieve(
+      {
+        sessionId,
+        userMessage,
+        agentId,
+        limit: options.conversationLimit ?? 20,
+        semanticEnabled: options.semanticEnabled ?? false,
+        semanticTopK: options.semanticTopK ?? 3,
+        semanticMinScore: options.semanticMinScore ?? 0.65,
+        maxRetrievedMemories: options.maxRetrievedMemories ?? 25,
+        sessionContextTokens: options.sessionContextTokens ?? 8192,
+      },
+      signal
     )
-    return result
-  } catch {
-    logActivity('memory', 'Retrieve memory', 'error')
-    return EMPTY_RETRIEVE
+    const ms = Math.round(performance.now() - startedAt)
+    if (signal?.aborted) return EMPTY_RETRIEVE
+    if (!res || !res.ok) {
+      logActivity('memory', 'Retrieve memory', 'error', `${ms}ms`)
+      return EMPTY_RETRIEVE
+    }
+    try {
+      const result = (await res.json()) as RetrieveResult
+      logActivity(
+        'memory',
+        'Retrieve memory',
+        'ok',
+        `${ms}ms · ${result.conversation.length} conv · ${result.semantic.length} semantic`
+      )
+      prefetchCache = { sessionId, queryKey, result, ts: Date.now() }
+      return result
+    } catch {
+      if (signal?.aborted) return EMPTY_RETRIEVE
+      logActivity('memory', 'Retrieve memory', 'error')
+      return EMPTY_RETRIEVE
+    }
+  })().finally(() => {
+    inFlightRetrieves.delete(queryKey)
+  })
+
+  inFlightRetrieves.set(queryKey, promise)
+  return promise
+}
+
+/** Matches runtime orchestrator semantic timeout (MP2 final await cap). */
+export const SEMANTIC_BUDGET_MS = 300
+
+function prefetchMatchesFinal(
+  prefetch: SpeculativePrefetch,
+  sessionId: string,
+  finalText: string,
+  options: RetrieveOptions
+): boolean {
+  if (prefetch.sessionId !== sessionId) return false
+  const final = finalText.trim().toLowerCase()
+  const pref = prefetch.userMessage.trim().toLowerCase()
+  if (final === pref || final.startsWith(pref) || pref.startsWith(final)) return true
+  return buildRetrieveQueryKey(sessionId, finalText, options) === prefetch.queryKey
+}
+
+async function awaitWithBudget(
+  promise: Promise<RetrieveResult>,
+  budgetMs: number,
+  signal?: AbortSignal
+): Promise<RetrieveResult> {
+  if (signal?.aborted) return EMPTY_RETRIEVE
+  if (budgetMs <= 0) return EMPTY_RETRIEVE
+
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (result: RetrieveResult) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      resolve(result)
+    }
+    const onAbort = () => finish(EMPTY_RETRIEVE)
+    const timer = setTimeout(() => finish(EMPTY_RETRIEVE), budgetMs)
+    promise.then(finish).catch(() => finish(EMPTY_RETRIEVE))
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/** MP2: start retrieve while the user is still speaking (after local gate passes). */
+export function startSpeculativeRetrieve(
+  sessionId: string,
+  userMessage: string,
+  options: RetrieveOptions
+): void {
+  if (!options.semanticEnabled) return
+
+  const trimmed = userMessage.trim()
+  if (!trimmed) return
+
+  const queryKey = buildRetrieveQueryKey(sessionId, trimmed, options)
+  if (
+    speculativePrefetch &&
+    speculativePrefetch.sessionId === sessionId &&
+    speculativePrefetch.queryKey === queryKey
+  ) {
+    return
   }
+
+  cancelSpeculativePrefetch()
+
+  const controller = new AbortController()
+  const promise = retrieveMemory(sessionId, trimmed, {
+    ...options,
+    signal: controller.signal,
+  })
+
+  speculativePrefetch = {
+    sessionId,
+    userMessage: trimmed,
+    queryKey,
+    promise,
+    controller,
+  }
+}
+
+/**
+ * MP2: on final transcript, reuse matching interim prefetch (≤300ms await) or
+ * fall through to MP1 retrieve. Never blocks STT — call only from processTurn.
+ */
+export async function finalizeRetrieve(
+  sessionId: string,
+  userMessage: string,
+  options: RetrieveOptions = {},
+  agentId = 'jarvis'
+): Promise<RetrieveResult> {
+  const { signal } = options
+  if (signal?.aborted) return EMPTY_RETRIEVE
+
+  const prefetch = speculativePrefetch
+  if (prefetch && prefetchMatchesFinal(prefetch, sessionId, userMessage, options)) {
+    speculativePrefetch = null
+    logActivity('memory', 'Retrieve memory', 'ok', 'interim prefetch')
+    return awaitWithBudget(prefetch.promise, SEMANTIC_BUDGET_MS, signal)
+  }
+
+  cancelSpeculativePrefetch()
+  return retrieveMemory(sessionId, userMessage, options, agentId)
 }
 
 export interface SearchResult {
   hits: SemanticHit[]
+}
+
+export interface UserFact {
+  id: string
+  key: string
+  value: string
+  confidence: number
+  sourceTurnId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProfileResult {
+  facts: UserFact[]
+}
+
+/** Active profile facts (MF0). Empty on failure — never throws into UI. */
+export async function fetchProfileFacts(limit = 100): Promise<UserFact[]> {
+  try {
+    const res = await fetch(`${RUNTIME_BASE}/api/memory/profile?limit=${limit}`)
+    if (!res.ok) return []
+    return ((await res.json()) as ProfileResult).facts ?? []
+  } catch {
+    return []
+  }
 }
 
 /** Debug semantic search (Memory Settings → Debug). Empty on failure. */

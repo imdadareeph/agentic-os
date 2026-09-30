@@ -209,3 +209,27 @@ class ReflectResponse(BaseModel):
     """Result of a manual dirty-turn reflection drain (also runs in the idle worker)."""
 
     reflected: int = 0
+
+
+class UserFact(BaseModel):
+    id: str
+    key: str
+    value: str
+    confidence: float
+    sourceTurnId: str | None = None
+    createdAt: str
+    updatedAt: str
+
+
+class ProfileResponse(BaseModel):
+    facts: list[UserFact] = []
+
+
+class ProfileExtractRequest(BaseModel):
+    text: str
+    turnId: str | None = None
+    sessionId: str | None = None
+
+
+class ProfileExtractResponse(BaseModel):
+    extracted: int = 0

@@ -11,7 +11,7 @@ from tools.schemas import ToolContext
 
 # The React dev server (Vite) owns /api/vitals via vite-vitals-plugin.ts — not
 # the Python runtime. We proxy to it rather than duplicating fetch-vitals.ts.
-VITALS_URL = os.environ.get("JARVIS_VITALS_URL", "http://127.0.0.1:3000/api/vitals")
+VITALS_URL = os.environ.get("JARVIS_VITALS_URL", "http://127.0.0.1:4765/api/vitals")
 
 
 async def fetch(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:

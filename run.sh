@@ -7,23 +7,38 @@ APP="$ROOT/app"
 RUNTIME="$ROOT/runtime"
 
 # ── URLs ──────────────────────────────────────────────────────────────────────
-JARVIS_URL="http://localhost:3000"
-VITALS_URL="http://localhost:3000/api/vitals"
-MEMORY_URL="http://localhost:8000"
+JARVIS_URL="http://localhost:4765"
+MEMORY_GALAXY_URL="$JARVIS_URL/memory"
+VITALS_URL="$JARVIS_URL/api/vitals"
+MEMORY_URL="http://127.0.0.1:8000"
 MEMORY_HEALTH_URL="$MEMORY_URL/api/memory/health"
-WHISPER_URL="http://localhost:9000"
-OLLAMA_URL="http://localhost:11434"
-VOICEBOX_URL="http://localhost:17493"
-GITNEXUS_URL="http://localhost:4747"
+MEMORY_PROFILE_URL="$MEMORY_URL/api/memory/profile"
+RUNTIME_PROXY_URL="$JARVIS_URL/runtime"
+RUNTIME_HEALTH_PROXY="$RUNTIME_PROXY_URL/api/memory/health"
+WHISPER_URL="http://127.0.0.1:9000"
+WHISPER_PROXY="$JARVIS_URL/whisper"
+OLLAMA_URL="http://127.0.0.1:11434"
+OLLAMA_PROXY="$JARVIS_URL/ollama"
+VOICEBOX_URL="http://127.0.0.1:17493"
+VOICEBOX_PROXY="$JARVIS_URL/voicebox"
+GITNEXUS_URL="http://127.0.0.1:4747"
+GITNEXUS_PROXY="$JARVIS_URL/gitnexus"
+ANTHROPIC_PROXY="$JARVIS_URL/anthropic"
+GEMINI_PROXY="$JARVIS_URL/gemini"
+ANTHROPIC_CLOUD="https://api.anthropic.com"
+GEMINI_CLOUD="https://generativelanguage.googleapis.com"
+OBSIDIAN_URL="https://127.0.0.1:27124"
+TOOLS_HEALTH_URL="$MEMORY_URL/api/tools/health"
+TOOLS_EVENTS_URL="$RUNTIME_PROXY_URL/api/tools/events"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
-  GREEN='\033[0;32m'
-  YELLOW='\033[1;33m'
-  CYAN='\033[0;36m'
-  DIM='\033[2m'
-  BOLD='\033[1m'
-  NC='\033[0m'
+  GREEN=$'\033[0;32m'
+  YELLOW=$'\033[1;33m'
+  CYAN=$'\033[0;36m'
+  DIM=$'\033[2m'
+  BOLD=$'\033[1m'
+  NC=$'\033[0m'
 else
   GREEN='' YELLOW='' CYAN='' DIM='' BOLD='' NC=''
 fi
@@ -47,7 +62,7 @@ export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-2}"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 probe() {
-  curl -sf --max-time "${2:-3}" "$1" >/dev/null 2>&1
+  curl -skf --max-time "${2:-3}" "$1" >/dev/null 2>&1
 }
 
 wait_for() {
@@ -120,10 +135,46 @@ print_status() {
   fi
 
   if probe "$probe_url"; then
-    printf "  ${GREEN}●${NC} %-14s ${CYAN}%-32s${NC} ${GREEN}online${NC}%b\n" "$name" "$url" "$note"
+    printf "  ${GREEN}●${NC} %-18s ${CYAN}%-40s${NC} ${GREEN}online${NC}%b\n" "$name" "$url" "$note"
   else
-    printf "  ${YELLOW}○${NC} %-14s ${CYAN}%-32s${NC} ${YELLOW}offline${NC}%b\n" "$name" "$url" "$note"
+    printf "  ${YELLOW}○${NC} %-18s ${CYAN}%-40s${NC} ${YELLOW}offline${NC}%b\n" "$name" "$url" "$note"
   fi
+}
+
+print_proxy() {
+  local name="$1"
+  local proxy_url="$2"
+  local target_url="$3"
+  local probe_url="$4"
+  local role="${5:-}"
+
+  local status="${YELLOW}offline${NC}"
+  local dot="${YELLOW}○${NC}"
+  if probe "$probe_url"; then
+    status="${GREEN}online${NC}"
+    dot="${GREEN}●${NC}"
+  fi
+
+  local note=""
+  if [[ -n "$role" ]]; then
+    note="  ${DIM}($role)${NC}"
+  fi
+
+  printf "  ${dot} %-18s ${CYAN}%-40s${NC} ${status}%b\n" "$name" "$proxy_url"
+  printf "  ${DIM}%-20s → %s${NC}\n" "" "$target_url"
+}
+
+print_endpoint() {
+  local name="$1"
+  local url="$2"
+  local role="${3:-}"
+  local note=""
+
+  if [[ -n "$role" ]]; then
+    note="  ${DIM}($role)${NC}"
+  fi
+
+  printf "  ${DIM}·${NC} %-18s ${CYAN}%s${NC}%b\n" "$name" "$url" "$note"
 }
 
 print_dashboard() {
@@ -132,15 +183,41 @@ print_dashboard() {
   echo "${BOLD}  Agentic OS — JARVIS${NC}"
   echo "${BOLD}═══════════════════════════════════════════════════════════════${NC}"
   echo ""
-  print_status "JARVIS UI" "$JARVIS_URL" "$JARVIS_URL/" "voice command center"
+  echo "${BOLD}  Application${NC}"
+  print_status "JARVIS UI" "$JARVIS_URL/" "$JARVIS_URL/" "voice command center"
+  print_status "Memory Galaxy" "$MEMORY_GALAXY_URL" "$JARVIS_URL/" "vault graph · same dev server"
   print_status "Vitals API" "$VITALS_URL" "$VITALS_URL" "YouTube · Instagram · Ollama stats"
-  print_status "Memory Runtime" "$MEMORY_URL" "$MEMORY_HEALTH_URL" "conversation persistence · SQLite"
-  print_status "Whisper STT" "$WHISPER_URL" "$WHISPER_URL/v1/models" "optional · refine transcription"
-  print_status "Ollama LLM" "$OLLAMA_URL" "$OLLAMA_URL/api/tags" "JARVIS brain"
-  print_status "Voicebox" "$VOICEBOX_URL" "$VOICEBOX_URL/health" "optional STT/TTS"
-  print_status "GitNexus" "$GITNEXUS_URL" "$GITNEXUS_URL" "optional code graph"
   echo ""
-  echo "${DIM}  Proxies (via Vite): /runtime · /whisper · /voicebox · /ollama · /anthropic · /gemini · /gitnexus${NC}"
+  echo "${BOLD}  Vite proxies${NC} ${DIM}(browser path → backend)${NC}"
+  print_proxy "Runtime /memory" "$RUNTIME_PROXY_URL" "$MEMORY_URL" "$RUNTIME_HEALTH_PROXY" "conversation · tools · profile"
+  print_proxy "Whisper STT" "$WHISPER_PROXY" "$WHISPER_URL" "$WHISPER_URL/v1/models" "optional · refine transcription"
+  print_proxy "Voicebox" "$VOICEBOX_PROXY" "$VOICEBOX_URL" "$VOICEBOX_URL/health" "optional STT/TTS"
+  print_proxy "Ollama LLM" "$OLLAMA_PROXY" "$OLLAMA_URL" "$OLLAMA_URL/api/tags" "JARVIS brain"
+  print_proxy "GitNexus" "$GITNEXUS_PROXY" "$GITNEXUS_URL" "$GITNEXUS_URL" "optional code graph"
+  print_proxy "Anthropic" "$ANTHROPIC_PROXY" "$ANTHROPIC_CLOUD" "$JARVIS_URL/" "cloud · proxy ready when UI up"
+  print_proxy "Gemini" "$GEMINI_PROXY" "$GEMINI_CLOUD" "$JARVIS_URL/" "cloud · proxy ready when UI up"
+  echo ""
+  echo "${BOLD}  Memory runtime${NC} ${DIM}(direct :8000)${NC}"
+  print_status "Health" "$MEMORY_HEALTH_URL" "$MEMORY_HEALTH_URL" "SQLite · Chroma · vault"
+  print_endpoint "Profile facts" "$MEMORY_PROFILE_URL" "GET active user_facts"
+  print_endpoint "Retrieve" "$MEMORY_URL/api/memory/retrieve" "POST conversation + semantic"
+  print_endpoint "Store turn" "$MEMORY_URL/api/memory/store" "POST persist turn"
+  print_endpoint "Graph" "$MEMORY_URL/api/memory/graph" "GET Memory Galaxy data"
+  print_endpoint "Sessions" "$MEMORY_URL/api/sessions" "POST create · DELETE end"
+  echo ""
+  echo "${BOLD}  Tools runtime${NC} ${DIM}(same process :8000)${NC}"
+  print_status "Tools health" "$TOOLS_HEALTH_URL" "$TOOLS_HEALTH_URL" "registry · MCP"
+  print_endpoint "Tool events" "$TOOLS_EVENTS_URL" "SSE via /runtime proxy"
+  print_endpoint "Tool loop" "$MEMORY_URL/api/tools/loop" "POST supervised agent loop"
+  print_endpoint "Tool catalog" "$MEMORY_URL/api/tools/catalog" "GET registered tools"
+  echo ""
+  echo "${BOLD}  Optional local${NC}"
+  print_status "Obsidian REST" "$OBSIDIAN_URL" "$OBSIDIAN_URL" "episodic vault API · TLS self-signed"
+  print_status "Whisper Docker" "$WHISPER_URL" "$WHISPER_URL/v1/models" "npm run voice:whisper"
+  print_status "Voicebox daemon" "$VOICEBOX_URL" "$VOICEBOX_URL/health" "cloned JARVIS TTS"
+  print_status "GitNexus daemon" "$GITNEXUS_URL" "$GITNEXUS_URL" "code graph MCP"
+  echo ""
+  echo "${DIM}  Data: ~/jarvis/db/memory.db · ~/jarvis/vault/${NC}"
   echo "${DIM}  Press Ctrl+C to stop all services started by this script.${NC}"
   echo ""
 }
@@ -198,7 +275,7 @@ start_memory_runtime() {
 start_jarvis() {
   if probe "$JARVIS_URL/"; then
     echo "  Restarting JARVIS dev server…"
-    kill_port 3000 "JARVIS"
+    kill_port 4765 "JARVIS"
   else
     echo "  Starting JARVIS dev server…"
   fi

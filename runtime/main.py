@@ -25,6 +25,7 @@ from memory import (
     obsidian_config,
     orchestrator,
     procedural,
+    profile,
     reflection,
     retention,
     semantic,
@@ -45,6 +46,9 @@ from models.memory import (
     MemoryGraphResponse,
     ObsidianConfigRequest,
     ObsidianConfigResponse,
+    ProfileExtractRequest,
+    ProfileExtractResponse,
+    ProfileResponse,
     ReflectResponse,
     RetrieveRequest,
     RetrieveResponse,
@@ -56,6 +60,7 @@ from models.memory import (
     ToolRunRequest,
     ToolRunResponse,
     Turn,
+    UserFact,
     VaultNoteResponse,
 )
 from models.tools import (
@@ -276,6 +281,27 @@ async def search(body: SearchRequest) -> SearchResponse:
     except Exception:
         hits = []
     return SearchResponse(hits=[SemanticHit(**h) for h in hits])
+
+
+@app.get("/api/memory/profile", response_model=ProfileResponse)
+async def get_profile(limit: int = 100) -> ProfileResponse:
+    """Active profile facts (MF0). Survives sessions — stored in SQLite."""
+    facts = await profile.list_active_facts(app.state.db, limit)
+    return ProfileResponse(facts=[UserFact(**f) for f in facts])
+
+
+@app.post("/api/memory/profile/extract", response_model=ProfileExtractResponse)
+async def extract_profile(body: ProfileExtractRequest) -> ProfileExtractResponse:
+    """Internal profile extraction — idle only (MF0 shell; MF1 enqueues from storeTurn)."""
+    if not idle.is_idle():
+        raise HTTPException(
+            status_code=409,
+            detail="Profile extraction deferred while conversation is active",
+        )
+    extracted = await profile.extract_from_text(
+        app.state.db, body.text, body.turnId
+    )
+    return ProfileExtractResponse(extracted=extracted)
 
 
 @app.post("/api/memory/sync", response_model=SyncResponse)

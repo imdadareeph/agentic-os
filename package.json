@@ -1,4 +1,11 @@
 {
+  "scripts": {
+    "dev": "npm run dev --prefix app",
+    "build": "npm run build --prefix app",
+    "runtime:dev": "npm run runtime:dev --prefix app",
+    "runtime:check": "npm run runtime:check --prefix app",
+    "runtime:test": "npm run runtime:test --prefix app"
+  },
   "dependencies": {
     "headroom-ai": "^0.22.4"
   }

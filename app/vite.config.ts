@@ -47,11 +47,11 @@ export default defineConfig({
   base: './',
   plugins: [inspectAttr(), react(), vitalsApiPlugin()],
   server: {
-    port: 3000,
+    port: 4765,
     proxy: serviceProxy,
   },
   preview: {
-    port: 3000,
+    port: 4765,
     proxy: serviceProxy,
   },
   resolve: {

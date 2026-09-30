@@ -17,11 +17,13 @@ import {
   getObsidianConfig,
   saveObsidianConfig,
   searchMemory,
+  fetchProfileFacts,
   syncMemory,
   type MemoryHealth,
   type ObsidianConfigInfo,
   type SemanticHit,
   type SyncResult,
+  type UserFact,
 } from '@/services/memory'
 import {
   getDefaultMemorySettings,
@@ -84,6 +86,8 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
   const [debugQuery, setDebugQuery] = useState('how do I set up docker for agents')
   const [debugHits, setDebugHits] = useState<SemanticHit[] | null>(null)
   const [debugLoading, setDebugLoading] = useState(false)
+  const [profileFacts, setProfileFacts] = useState<UserFact[] | null>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [obsidianCfg, setObsidianCfg] = useState<ObsidianConfigInfo | null>(null)
   const [obsidianBaseUrl, setObsidianBaseUrl] = useState('https://127.0.0.1:27124')
   const [obsidianKeyInput, setObsidianKeyInput] = useState('')
@@ -121,6 +125,22 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
       setObsidianCfg(cfg)
       setObsidianBaseUrl(cfg.baseUrl)
     })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setProfileLoading(true)
+    void fetchProfileFacts()
+      .then(facts => {
+        if (!cancelled) setProfileFacts(facts)
+      })
+      .finally(() => {
+        if (!cancelled) setProfileLoading(false)
+      })
     return () => {
       cancelled = true
     }
@@ -436,6 +456,39 @@ export default function MemorySettingsSheet({ open, onOpenChange }: MemorySettin
           </Section>
 
           <Section title="Debug">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-white/70 text-xs">Profile facts (read-only)</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="border-white/10 text-white/70 h-7 text-[10px]"
+                  disabled={profileLoading || runtimeDown}
+                  onClick={() => {
+                    setProfileLoading(true)
+                    void fetchProfileFacts()
+                      .then(facts => setProfileFacts(facts))
+                      .finally(() => setProfileLoading(false))
+                  }}
+                >
+                  {profileLoading ? 'Loading…' : 'Refresh'}
+                </Button>
+              </div>
+              {profileFacts && profileFacts.length === 0 && (
+                <p className="text-[9px] text-white/30">No profile facts stored yet.</p>
+              )}
+              {profileFacts?.map(fact => (
+                <div key={fact.id} className="text-[9px] border border-white/10 p-2 space-y-1">
+                  <div className="flex justify-between text-white/40 gap-2">
+                    <span className="font-mono truncate">{fact.key}</span>
+                    <span className="text-amber-400/70 shrink-0">{fact.confidence.toFixed(2)}</span>
+                  </div>
+                  <p className="text-white/60 leading-relaxed">{fact.value}</p>
+                </div>
+              ))}
+            </div>
+
             <Input
               className="bg-white/5 border-white/10 text-white/80 text-xs"
               value={debugQuery}
