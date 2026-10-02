@@ -36,6 +36,8 @@
 | [`plans/MEMORY_EVOLUTION_PLAN.md`](plans/MEMORY_EVOLUTION_PLAN.md) | Prefetch (MP), Profile (MF), Persona (ME) — Mem0/VoiceMem patterns |
 | [`plans/WEB_TERMINAL_ANALYSIS.md`](plans/WEB_TERMINAL_ANALYSIS.md) | Voice-opened web PTY vs ttyd/Wetty/Xterm.js; Ghost OS + aictl fit |
 | [`plans/WEB_TERMINAL_EXTRACTION.md`](plans/WEB_TERMINAL_EXTRACTION.md) | File-level extract from local aictl + Ghost OS clones |
+| [`plans/OBSIDIAN_VAULT_SWITCH_FIX.md`](plans/OBSIDIAN_VAULT_SWITCH_FIX.md) | Dual Obsidian REST config + `run.sh` TLS probe runbook |
+| [`plans/GITNEXUS_IPV6_BIND_FIX.md`](plans/GITNEXUS_IPV6_BIND_FIX.md) | GitNexus `serve` IPv6-only bind vs `127.0.0.1` health checks |
 
 ---
 
